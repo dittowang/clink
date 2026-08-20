@@ -73,6 +73,9 @@ export async function createLineupScene(ctx: BootCtx): Promise<SceneHandle> {
       const inst = instantiateDrink(e.tier)
       inst.group.scale.setScalar(e.s)
       inst.group.position.set(cursor + e.halfW, 0, 0)
+      // static scene: level the liquid plane at the (scaled) fill height —
+      // instantiateDrink hands out constant-0 planes for the game to drive
+      if (inst.liquid) inst.liquid.plane.constant = e.s * inst.liquid.fillY
       scene.add(inst.group)
       placed.push({ tier: e.tier, key: TIERS[e.tier].key, group: inst.group, baseY: 0, scale: e.s })
       cursor += e.halfW * 2 + GAP
@@ -100,6 +103,9 @@ export async function createLineupScene(ctx: BootCtx): Promise<SceneHandle> {
       const inst = instantiateDrink(tier)
       inst.group.position.set(x, SURFACE_Y, z)
       inst.group.rotation.y = rotY
+      // static scene: level the liquid plane at the world fill height —
+      // instantiateDrink hands out constant-0 planes for the game to drive
+      if (inst.liquid) inst.liquid.plane.constant = SURFACE_Y + inst.liquid.fillY
       inst.group.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           o.castShadow = true

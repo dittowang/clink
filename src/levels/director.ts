@@ -65,8 +65,21 @@ export class SpawnDirector {
 
   /** the game's draw — consumes the level's seeded stream */
   draw(): TierId {
-    return this.drawFrom(this.rng)
+    let t = this.drawFrom(this.rng)
+    // streak guard: 4+ identical draws in a row makes the tutorial pools feel
+    // rigged-monotonous (seed 1337 dealt 7 juice boxes straight); one forced
+    // redraw stays deterministic and barely dents the weighting
+    if (t === this.lastDraw && this.streak >= 3 && this.pool.length > 1) {
+      const other = this.drawFrom(this.rng)
+      if (other !== t) t = other
+    }
+    if (t === this.lastDraw) this.streak++
+    else { this.lastDraw = t; this.streak = 1 }
+    return t
   }
+
+  private lastDraw: TierId | null = null
+  private streak = 0
 
   /**
    * QA: histogram of n draws against the CURRENT table state, using a private

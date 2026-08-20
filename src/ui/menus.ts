@@ -103,9 +103,12 @@ export function createMenus(cb: MenuCallbacks): Menus {
       'div',
       'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;' +
         `justify-content:center;gap:14px;background:rgba(6,16,26,${dim});color:#fff;` +
-        'text-align:center;overflow-y:auto;padding:24px 16px;'
+        'text-align:center;overflow-y:auto;padding:24px 16px;' +
+        'opacity:0;transition:opacity .28s ease-out;'
     )
     root.appendChild(p)
+    // fade every panel in — a full-opacity same-frame appearance reads as a cut
+    requestAnimationFrame(() => { p.style.opacity = '1' })
     return p
   }
 
@@ -305,6 +308,7 @@ export function createMenus(cb: MenuCallbacks): Menus {
     p.appendChild(
       el('div', 'font-size:19px;opacity:.92;font-variant-numeric:tabular-nums;', `${t('score')} ${score}`)
     )
+    const list = cb.save().endless
     const board = el(
       'div',
       'min-width:240px;border-radius:14px;background:rgba(255,255,255,.08);padding:12px 18px;' +
@@ -313,7 +317,6 @@ export function createMenus(cb: MenuCallbacks): Menus {
     board.appendChild(
       el('div', 'font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.75;margin-bottom:6px;', t('leaderboard'))
     )
-    const list = cb.save().endless
     list.forEach((s, i) => {
       const row = el(
         'div',
@@ -323,7 +326,8 @@ export function createMenus(cb: MenuCallbacks): Menus {
       row.append(el('span', '', `${i + 1}.`), el('span', '', String(s)))
       board.appendChild(row)
     })
-    p.appendChild(board)
+    // no header over an empty list — a merge-less first run charts nothing
+    if (list.length > 0) p.appendChild(board)
     p.append(button(t('retry'), BTN_PRIMARY, cb.onRestart), button(t('quit'), BTN_GHOST, cb.onQuit))
   }
 

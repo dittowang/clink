@@ -51,6 +51,9 @@ async function boot(): Promise<void> {
   } else if (which === 'ladder') {
     const { createLadderScene } = await import('./harness/scenes/ladder')
     scene = await createLadderScene(ctx)
+  } else if (which === 'probe') {
+    const { createProbeScene } = await import('./harness/scenes/probe')
+    scene = await createProbeScene(ctx)
   } else {
     const { createGameScene } = await import('./levels/gameScene')
     scene = await createGameScene(ctx)

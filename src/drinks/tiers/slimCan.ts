@@ -110,12 +110,16 @@ export function buildSlimCan(): DrinkVisual {
       ctx.closePath()
       ctx.fill()
 
-      // wave stripes across the teal (wavelengths divide w -> seamless)
-      paintWave(ctx, w, 0.5 * h, 10, 128, '#5cc9d6', 9)
-      paintWave(ctx, w, 0.55 * h, 10, 128, '#0c7b8d', 8)
-      paintWave(ctx, w, 0.6 * h, 9, 128, '#d8f2f5', 4)
-      paintWave(ctx, w, 0.72 * h, 8, w / 3, '#43b7c5', 7)
-      paintWave(ctx, w, 0.77 * h, 8, w / 3, '#0c7b8d', 6)
+      // wave stripes across the teal (wavelengths divide w -> seamless).
+      // Contrast authored HOT: the old mid-teal set (#5cc9d6/#0c7b8d, 4–9 px)
+      // sat within a stop of the band and vanished at probe range — these
+      // push both ways (near-white lights, deep-ink darks) and widen a touch
+      // so the lacquered wave print survives AgX + condensation at 1–2 px
+      paintWave(ctx, w, 0.5 * h, 10, 128, '#a7ecf4', 11)
+      paintWave(ctx, w, 0.55 * h, 10, 128, '#054b5c', 10)
+      paintWave(ctx, w, 0.6 * h, 9, 128, '#eefcfd', 6)
+      paintWave(ctx, w, 0.72 * h, 8, w / 3, '#8fdfe9', 9)
+      paintWave(ctx, w, 0.77 * h, 8, w / 3, '#054b5c', 8)
 
       // tiny roundel + wordmark on the white field
       paintRoundel(ctx, w / 2, 0.18 * h, 42, {

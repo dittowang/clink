@@ -58,6 +58,16 @@ const WET_HALF_T = 0.00075
 const CONTACT_FORCE_THRESHOLD = 2
 
 /**
+ * Contact skin on the RAIL colliders only (m). At full launch speed a can
+ * travels ~19 mm per 120 Hz step, so its first post-step pose could sit
+ * ~8 mm inside a rail face for one frame before the solver pushed back. The
+ * skin resolves contacts that far off the face, turning the visible one-frame
+ * clip into an invisible ~4 mm gap. Plank and drink colliders are untouched —
+ * a skin there would float drinks above the wood and hold merges apart.
+ */
+const RAIL_SKIN = 0.004
+
+/**
  * A contact-force event is only surfaced as an 'impact' within this window
  * after the contact STARTS. Rapier re-reports the force every step it stays
  * above threshold, and a resting drink's support force alone exceeds 2 N —
@@ -83,7 +93,7 @@ const _impact: GameEvents['impact'] = {
   matA: '',
   matB: '',
 }
-const _sliding: GameEvents['sliding'] = { speed: 0, count: 0 }
+const _sliding: GameEvents['sliding'] = { speed: 0, count: 0, x: 0 }
 
 export class PhysicsWorld {
   readonly raw: RAPIER.World
@@ -231,7 +241,7 @@ export class PhysicsWorld {
         0,
         SURFACE_Y + RAIL_H / 2,
         FAR_Z - RAIL_T / 2
-      ),
+      ).setContactSkin(RAIL_SKIN),
       TABLE_WOOD.friction,
       TABLE_WOOD.restitution,
       'wood'
@@ -249,7 +259,7 @@ export class PhysicsWorld {
               sign * (HALF_W + RAIL_T / 2),
               SURFACE_Y + RAIL_H / 2,
               0
-            ),
+            ).setContactSkin(RAIL_SKIN),
             TABLE_WOOD.friction,
             TABLE_WOOD.restitution,
             'wood'
@@ -449,6 +459,7 @@ export class PhysicsWorld {
 
     let slidingSpeed = 0
     let slidingCount = 0
+    let slidingX = 0
     for (const d of this.all) {
       if (d.body.isSleeping()) {
         d.speed = 0
@@ -462,6 +473,7 @@ export class PhysicsWorld {
       if (d.speed > 0.02) {
         slidingSpeed += d.speed
         slidingCount++
+        slidingX += d.currPos.x * d.speed
       }
     }
 
@@ -470,6 +482,7 @@ export class PhysicsWorld {
 
     _sliding.speed = slidingSpeed
     _sliding.count = slidingCount
+    _sliding.x = slidingSpeed > 1e-6 ? slidingX / slidingSpeed : 0
     bus.emit('sliding', _sliding)
     this.busRef = null
   }

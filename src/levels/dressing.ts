@@ -72,9 +72,12 @@ function wetAlphaTexture(): THREE.CanvasTexture {
 // ---- umbrella ----
 
 const PLEATS = 10
-const CANOPY_R = 0.85
-const CANOPY_TOP_Y = 1.94
-const CANOPY_BASE_Y = 1.62
+// canopy raised 10 cm + radius −12% so the noon playfield breathes (the old
+// 0.85 m canopy at 1.94 m filled half the frame and shaded the whole plank).
+// The POLE COLLIDER (world.addPole) is untouched — gameplay-verified.
+const CANOPY_R = 0.75
+const CANOPY_TOP_Y = 2.04
+const CANOPY_BASE_Y = 1.72
 const FRINGE_SCALLOPS = 22
 
 function pleatScale(ang: number): number {
@@ -165,10 +168,10 @@ function buildUmbrella(x: number, z: number, d: Disposable): Umbrella {
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.72 })
   d.mats.push(woodMat)
 
-  const poleGeo = new THREE.CylinderGeometry(0.019, 0.024, 1.96, 12)
+  const poleGeo = new THREE.CylinderGeometry(0.019, 0.024, 2.06, 12)
   d.geo.push(poleGeo)
   const pole = new THREE.Mesh(poleGeo, woodMat)
-  pole.position.y = 0.98
+  pole.position.y = 1.03
   pole.castShadow = true
   group.add(pole)
 

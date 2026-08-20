@@ -27,6 +27,16 @@ export function whiteNoiseBuffer(ctx: BaseAudioContext): AudioBuffer {
 }
 
 export const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
+
+/**
+ * Table x (m) → StereoPanner pan. The playfield spans x ∈ [-0.4, 0.4]; the
+ * edges land at ±0.55 — clearly lateralized without ever hard-panning a
+ * clink into one ear.
+ */
+export const panForX = (x: number): number => {
+  const p = x * 1.375
+  return p < -0.55 ? -0.55 : p > 0.55 ? 0.55 : p
+}
 export const rand = (lo: number, hi: number): number => lo + Math.random() * (hi - lo)
 /** micro-variation: multiply v by 1 ± pct (audio needs no determinism) */
 export const vary = (v: number, pct: number): number => v * (1 + (Math.random() * 2 - 1) * pct)

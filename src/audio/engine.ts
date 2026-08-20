@@ -1,5 +1,5 @@
 import type { EventBus } from '../core/events'
-import { pinkNoise } from './dsp'
+import { panForX, pinkNoise } from './dsp'
 import { playImpact, type ScheduledVoice } from './impacts'
 import {
   playFoul,
@@ -141,8 +141,10 @@ class AudioEngine {
   /**
    * Impact voice pool: max 6 concurrent; stealing kills the OLDEST playing
    * voice with a 5 ms fade so a can shower never turns to mud or clipping.
+   * `pan` (-1..1) places the voice in the stereo field — the caller derives
+   * it from the impact point's table x via panForX.
    */
-  allocImpactVoice(): VoiceHandle | null {
+  allocImpactVoice(pan = 0): VoiceHandle | null {
     if (!this.ctx || !this.chain || this.ctx.state !== 'running') return null
     const ctx = this.ctx
     const now = ctx.currentTime
@@ -163,7 +165,9 @@ class AudioEngine {
       }
     }
     const gain = ctx.createGain()
-    gain.connect(this.chain.input)
+    const panner = ctx.createStereoPanner()
+    panner.pan.value = pan
+    gain.connect(panner).connect(this.chain.input)
     const voice: Voice = { gain, srcs: [], started: now, ends: now + 0.3 }
     this.voices.push(voice)
     return {
@@ -192,11 +196,12 @@ class AudioEngine {
     this.chain.master.gain.setTargetAtTime(this.muted ? 0 : MASTER_TRIM, this.ctx.currentTime, 0.02)
   }
 
-  /** hot path (120 Hz sliding events): no allocations, throttled writes */
-  updateSlide(speed: number): void {
+  /** hot path (120 Hz sliding events): no allocations, throttled writes.
+   *  x = sliding-centroid table x, mapped to pan inside the voice. */
+  updateSlide(speed: number, x: number): void {
     if (!this.ctx || !this.chain || this.ctx.state !== 'running') return
     if (!this.slide) this.slide = new SlideVoice(this.ctx, this.chain.input)
-    this.slide.update(speed, this.ctx.currentTime)
+    this.slide.update(speed, panForX(x), this.ctx.currentTime)
   }
 
   private startSurf(): void {
@@ -224,9 +229,9 @@ export function resumeOnGesture(el: EventTarget = window): () => void {
  */
 export function subscribe(bus: EventBus): () => void {
   const offs = [
-    bus.on('impact', (e) => playImpact(e.matA, e.matB, e.force)),
-    bus.on('sliding', (e) => audio.updateSlide(e.speed)),
-    bus.on('mergeDone', (e) => playMerge(e.tier, e.chain)),
+    bus.on('impact', (e) => playImpact(e.matA, e.matB, e.force, e.point.x)),
+    bus.on('sliding', (e) => audio.updateSlide(e.speed, e.x)),
+    bus.on('mergeDone', (e) => playMerge(e.tier, e.chain, e.centroid.x)),
     bus.on('spawnDrop', () => playSpawnThud()),
     bus.on('sandThud', () => playSandThud()),
     bus.on('foul', () => playFoul()),

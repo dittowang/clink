@@ -96,14 +96,22 @@ export function buildIceBucket(): DrinkVisual {
     // captures — the blue lean cancels the warm light back to neutral steel,
     // and under the lineup's cooler wash it lands on icy blue-gray, which is
     // the right family for an ice bucket
-    base: 0xa5b6c6,
-    sky: 0xd8e4ee,
-    ground: 0x46484c,
-    roughnessRange: [0.16, 0.55],
+    // one step darker across the bake than the first pass (base 0xa5b6c6 /
+    // sky 0xd8e4ee): under the night preset's dim blue hemisphere the pale
+    // map rendered as flat pale CERAMIC — the darker base holds gunmetal
+    // value at night while the golden lineup still reads it a cool blue-gray
+    base: 0x8595a4,
+    sky: 0xc2d2e0,
+    ground: 0x383b40,
+    // glossier streak floor + more env: the specular must survive the night
+    // env (intensity 0.35, moon disc boosted 9×) — it is what separates
+    // brushed steel from clay when the diffuse-ish bake goes dark
+    roughnessRange: [0.13, 0.46],
     anisotropy: 0.65,
-    // 0.7: at 1.1 the warm env swamped the baked map; at 0.55 the wall went
-    // too dark against the lid's brightness
-    envMapIntensity: 0.7,
+    // 1.15: the OLD pale bake got swamped by the warm env at 1.1, but the
+    // darker base needs the extra specular energy — it is what keeps the
+    // wall reading brushed METAL when the night env drops to 0.35
+    envMapIntensity: 1.15,
   })
   // cold tier: condensation NORMAL map, kept subtle — at 0.55 the droplet
   // bumps scatter the mirror read into speckled ceramic

@@ -124,6 +124,7 @@ async function main() {
         if (kind === 'pileup') return A.renderPileup()
         if (kind === 'surf') return A.renderSurf()
         if (kind === 'levels') return A.renderLevels()
+        if (kind === 'pan') return A.renderPan(Number(a ?? 0))
         throw new Error(`unknown --audio spec: ${s}`)
       }
       if (spec === 'matrix') {
@@ -135,6 +136,7 @@ async function main() {
         }
         for (const tier of [2, 5, 9]) out[`merge:${tier}`] = await one(`merge:${tier}`)
         out['merge:5:4'] = await one('merge:5:4')
+        for (const x of [-0.4, 0, 0.4]) out[`pan:${x}`] = await one(`pan:${x}`)
         out['pileup'] = await one('pileup')
         out['surf'] = await one('surf')
         out['levels'] = await one('levels')

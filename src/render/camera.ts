@@ -53,7 +53,9 @@ export function createCameraRig(viewW: number, viewH: number): CameraRig {
         active = true
       }
       const s = THREE.MathUtils.clamp(strength01, 0, 1)
-      const px = 3 + 2 * s // 3–5 px worth of displacement
+      // proportional: 1.6 px at the force gate rising to the 5 px cap — a
+      // constant floor made every gated impact read identically hard
+      const px = 1.6 + 3.4 * s
       // px -> world at the depth of the table centre
       const worldPerPx = (2 * base.distanceTo(CAM_TARGET) * Math.tan(THREE.MathUtils.degToRad(FOV / 2))) / viewHeight
       const amp = px * worldPerPx

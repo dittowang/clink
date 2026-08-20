@@ -22,7 +22,13 @@ export interface Hud {
   setObjective(text: string | null, done?: boolean): void
   /** floating score pop at the projection of a world point */
   pop(text: string, world: THREE.Vector3, camera: THREE.Camera): void
-  flashFoulWarning(): void
+  /**
+   * Persistent foul-warning pill: ON (pulsing) while any drink is inside the
+   * grace window, OFF the moment the danger clears or the consequence fires —
+   * the scene drives it every fixed step, so it can never silently time out
+   * before the foul lands.
+   */
+  setFoulWarning(on: boolean): void
   /** re-apply static labels after a locale change */
   relabel(): void
   /** show/hide the whole in-game HUD (menus hide it on the title screen) */
@@ -116,7 +122,12 @@ export function createHud(): Hud {
     el.style.opacity = '0'
   }
 
-  // ---- foul warning chip ----
+  // ---- foul warning chip (persistent + pulsing while the danger stands) ----
+  const foulStyle = document.createElement('style')
+  foulStyle.textContent =
+    '@keyframes clinkFoulPulse{0%,100%{transform:translateX(-50%) scale(1)}' +
+    '50%{transform:translateX(-50%) scale(1.07)}}'
+  root.appendChild(foulStyle)
   const foulChip = document.createElement('div')
   foulChip.style.cssText =
     'position:absolute;top:16px;left:50%;transform:translateX(-50%);padding:6px 14px;' +
@@ -124,13 +135,12 @@ export function createHud(): Hud {
     'font-weight:600;opacity:0;transition:opacity .18s;'
   foulChip.textContent = t('foulWarn')
   root.appendChild(foulChip)
-  let foulTimer = 0
-  function flashFoulWarning(): void {
-    foulChip.style.opacity = '1'
-    clearTimeout(foulTimer)
-    foulTimer = window.setTimeout(() => {
-      foulChip.style.opacity = '0'
-    }, 1300)
+  let foulOn = false
+  function setFoulWarning(on: boolean): void {
+    if (on === foulOn) return
+    foulOn = on
+    foulChip.style.opacity = on ? '1' : '0'
+    foulChip.style.animation = on ? 'clinkFoulPulse .55s ease-in-out infinite' : ''
   }
 
   let objText: string | null = null
@@ -160,7 +170,7 @@ export function createHud(): Hud {
       objChip.style.background = done ? 'rgba(38,120,66,.72)' : 'rgba(10,26,38,.55)'
     },
     pop,
-    flashFoulWarning,
+    setFoulWarning,
     relabel() {
       scoreLabel.textContent = t('score')
       pushLabel.textContent = t('pushes')
@@ -171,7 +181,6 @@ export function createHud(): Hud {
       root.style.display = v ? '' : 'none'
     },
     dispose() {
-      clearTimeout(foulTimer)
       root.remove()
     },
   }

@@ -1,8 +1,10 @@
 import RAPIER from '@dimforge/rapier3d-compat'
 import { createRenderer } from './render/renderer'
+import { installPerf } from './render/quality'
 import { Scheduler, type Steppable } from './core/scheduler'
 import { sceneParam, isHarness, markReady } from './harness/api'
 import { detectLocale, setLocale } from './core/strings'
+import { templateMergeStats } from './drinks'
 
 /**
  * Boot: init Rapier BEFORE any world exists, create the renderer, route to
@@ -59,6 +61,10 @@ async function boot(): Promise<void> {
     const { createGameScene } = await import('./levels/gameScene')
     scene = await createGameScene(ctx)
   }
+
+  // window.__perf: quality tier + forced-sync timing probe + renderer.info
+  // counters + drink-template merge stats (docs/PERF.md)
+  installPerf(renderer, () => scene?.render(), templateMergeStats)
 
   window.addEventListener('resize', () => {
     const w = container.clientWidth, h = container.clientHeight

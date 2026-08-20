@@ -73,16 +73,17 @@ export const PRESETS: Record<PresetName, LightingPreset> = {
   },
   noon: {
     name: 'noon',
-    // near-overhead white key, short hard shadows, maximum sea sparkle
+    // near-overhead key, short hard shadows, maximum sea sparkle. Sun a touch
+    // warm (pure white read gray on the plank) + a 5% exposure lift below.
     elevDeg: 72, azimDeg: 205,
-    sunColor: 0xffffff, sunIntensity: 3.2,
+    sunColor: 0xfff1dc, sunIntensity: 3.2,
     envSunBoost: 30, envIntensity: 0.7,
     zenith: 0x2965c9, horizon: 0xb9ddef, ground: 0xbfd3dd,
     sunTint: 0xffffff, sunTintStrength: 0.15, stars: 0,
     hemiSky: 0xa8cdf0, hemiGround: 0xd9c9a0, hemiIntensity: 0.65,
     seaNear: 0x1d6f9b, seaFar: 0x6ab8d8, glitter: 1.0, glitterColor: 0xffffff,
     sandTint: 0xf2ead8,
-    exposure: 1.0, fogColor: 0xd6e7f0, fogDensity: 0.004,
+    exposure: 1.05, fogColor: 0xd6e7f0, fogDensity: 0.004,
     moon: false, discRadius: 9, discIntensity: 5.0,
   },
   golden: {

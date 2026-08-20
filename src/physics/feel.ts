@@ -55,12 +55,38 @@ const LEAN_MAX: number[] = (() => {
 })()
 
 /**
- * Lean gain: 0.8° per m/s². Steady sliding decel is μg ≈ 3.1 m/s² → ~2.5° of
- * lean mid-slide on light tiers (visible but not cartoonish); the one-step
- * launch spike (hundreds of m/s²) just pins the target at LEAN_MAX for a
- * frame, which is exactly the "kick" the hand wants to see.
+ * Lean gain: 0.8° per m/s² on the juice box, scaled DOWN with the same mass
+ * curve as LEAN_MAX. All tiers see the same μg ≈ 3.1 m/s² sliding decel, so
+ * without the mass term every tier leaned identically mid-slide and weight
+ * was only readable from stop distance; with it the juice box heels ~2.6°
+ * while the pitcher holds ~1.4° under the same braking — light = flighty.
  */
 const ACCEL_TO_LEAN = 0.8 * DEG
+const LEAN_GAIN: number[] = (() => {
+  const arr = new Array<number>(13).fill(0)
+  for (const t of TIER_IDS) arr[t] = ACCEL_TO_LEAN * (LEAN_MAX[t] / LEAN_MAX[1])
+  return arr
+})()
+
+/**
+ * Launch rock-back kick, rad/s of spring velocity per m/s of launch Δv (on
+ * the juice box; heavier tiers scale down with the LEAN_MAX mass curve).
+ * WHY A KICK: the impulse changes the body's velocity inside ONE 1/120 s
+ * solver step, and with two fixed steps per rendered frame updateFeel's
+ * acceleration estimate (last-step pose delta vs lastVel) never samples that
+ * spike — the drink slid out nosing forward with no backward beat at all.
+ * The launch is the one moment Δv is known exactly, so the spring gets it
+ * directly: a full-pull juice box whips ~3° back, a pitcher ~1°, then the
+ * friction-decel target takes over and the nose settles forward.
+ */
+const LAUNCH_KICK = 0.8
+
+/** Kick the lean spring AGAINST the launch acceleration (dirX/dirZ unit). */
+export function applyLaunchLeanKick(drink: Drink, dirX: number, dirZ: number, dv: number): void {
+  const k = LAUNCH_KICK * dv * (LEAN_MAX[drink.tier] / LEAN_MAX[1])
+  drink.lean.vrx += -dirZ * k
+  drink.lean.vrz += dirX * k
+}
 
 /** Liquid tilts ~1.8× the container lean — the liquid overshoots the glass. */
 const LIQUID_OVERSHOOT = 1.8
@@ -96,8 +122,9 @@ export function updateFeel(drink: Drink, dtFrame: number): void {
   const az = (vz - drink.lastVel.z) * inv
 
   const max = LEAN_MAX[drink.tier]
-  const targetRx = clamp(-az * ACCEL_TO_LEAN, -max, max)
-  const targetRz = clamp(ax * ACCEL_TO_LEAN, -max, max)
+  const gain = LEAN_GAIN[drink.tier]
+  const targetRx = clamp(-az * gain, -max, max)
+  const targetRz = clamp(ax * gain, -max, max)
 
   // clamp dt: a hitchy 200 ms frame must not slingshot the spring
   const dt = Math.min(dtFrame, 0.05)

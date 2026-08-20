@@ -1,4 +1,5 @@
 import type { SoundMaterial } from '../config/tiers'
+import { panForX } from './dsp'
 import { buildMasterChain, buildSurfBed } from './engine'
 import { coerceMaterial, F_REF, isSoundMaterial, scheduleImpact } from './impacts'
 import { scheduleMerge } from './merge'
@@ -34,6 +35,18 @@ export interface AudioProbe {
   durationToMinus40dB: number
 }
 
+/** stereo-pan verification: a glass impact rendered through the live pan law */
+export interface PanProbe {
+  /** table x fed in (m) */
+  x: number
+  /** panForX(x) — the pan value the live voice would be given */
+  pan: number
+  leftRms: number
+  rightRms: number
+  /** pan recovered from the rendered L/R power split (equal-power law) */
+  measuredPan: number
+}
+
 /** post-master-chain peaks of the three level anchors + their ratios */
 export interface LevelReport {
   impactChainPeak: number
@@ -60,6 +73,8 @@ export interface AudioHarness {
   renderSurf(): Promise<AudioProbe>
   /** post-chain peaks: full-force glass impact vs merge vs surf */
   renderLevels(): Promise<LevelReport>
+  /** stereo render of a glass impact panned by table x via the live pan law */
+  renderPan(x: number): Promise<PanProbe>
 }
 
 declare global {
@@ -179,6 +194,39 @@ async function renderMastered(
 
 const T0 = 0.005
 
+/**
+ * Stereo probe: the exact scheduleImpact recipe through a StereoPanner set by
+ * the live pan law. measuredPan inverts the equal-power law
+ * (L = cos((p+1)π/4), R = sin((p+1)π/4)) from the channel RMS split, so the
+ * JSON both states the pan the game would use AND proves the rendered energy
+ * actually lands there.
+ */
+async function renderPanProbe(x: number): Promise<PanProbe> {
+  const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * 0.4), SAMPLE_RATE)
+  const pan = panForX(x)
+  const panner = ctx.createStereoPanner()
+  panner.pan.value = pan
+  panner.connect(ctx.destination)
+  scheduleImpact(ctx, panner, T0, 'glass', 'glass', F_REF)
+  const buf = await ctx.startRendering()
+  const rms = (ch: number): number => {
+    const d = buf.getChannelData(ch)
+    let s = 0
+    for (let i = 0; i < d.length; i++) s += d[i] * d[i]
+    return Math.sqrt(s / d.length)
+  }
+  const l = rms(0)
+  const r = rms(1)
+  const measuredPan = Math.atan2(r, l) / (Math.PI / 4) - 1
+  return {
+    x,
+    pan: round(pan, 4),
+    leftRms: round(l, 6),
+    rightRms: round(r, 6),
+    measuredPan: round(measuredPan, 4),
+  }
+}
+
 function requireMaterial(mat: string): SoundMaterial {
   if (!isSoundMaterial(mat)) {
     throw new Error(`unknown SoundMaterial "${mat}" (paper|aluminum|glass|husk|rind|steel)`)
@@ -218,6 +266,7 @@ export function installAudioHarness(): void {
       renderMastered(2, (ctx, input) => {
         buildSurfBed(ctx, input, 0)
       }),
+    renderPan: (x) => renderPanProbe(x),
     renderLevels: async () => {
       const impact = await renderMastered(0.6, (ctx, input) => {
         scheduleImpact(ctx, input, T0, 'glass', 'glass', F_REF)

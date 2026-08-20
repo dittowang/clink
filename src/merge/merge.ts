@@ -43,6 +43,14 @@ const MERGE_MAX_SPEED = 0.6
 const NEIGHBOR_RADIUS_X = 1.6
 /** target outward speed for shoved neighbours (m/s) */
 const NEIGHBOR_DV = 0.25
+/**
+ * Same-tier drinks whose footprint GAP is under this count as touching for
+ * the component BFS. The contact graph stays primary — the slop only ADDS
+ * edges. Why: a merge-grown drink can come to rest 1–4 mm from two same-tier
+ * neighbours (collider grow + neighbour shove timing) without Rapier ever
+ * reporting a contact pair, silently missing the follow-up cascade merge.
+ */
+const PROXIMITY_SLOP_M = 0.005
 
 export function mergeScore(resultTier: TierId, chain: number): number {
   return Math.round(resultTier * resultTier * 10 * Math.pow(1.5, chain - 1))
@@ -160,7 +168,8 @@ export class MergeSystem {
             if (
               this.world.contactPairs.has(
                 this.world.pairKey(cur.collider.handle, other.collider.handle)
-              )
+              ) ||
+              this.withinSlop(cur, other)
             ) {
               this.visited.add(other.id)
               this.stack.push(other)
@@ -170,6 +179,14 @@ export class MergeSystem {
         if (this.component.length >= 3) this.startMerge(tier)
       }
     }
+  }
+
+  /** planar footprint gap under PROXIMITY_SLOP_M (both drinks are upright cylinders) */
+  private withinSlop(a: Drink, b: Drink): boolean {
+    const dx = a.currPos.x - b.currPos.x
+    const dz = a.currPos.z - b.currPos.z
+    const reach = a.def.radius + b.def.radius + PROXIMITY_SLOP_M
+    return dx * dx + dz * dz < reach * reach
   }
 
   private startMerge(tier: TierId): void {

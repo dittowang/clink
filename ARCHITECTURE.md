@@ -85,10 +85,23 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
 - Environment: procedural beach scene (sky gradient sphere, sun disc, sea
   band, sand) → `PMREMGenerator.fromScene` → `scene.environment`, regenerated
   per preset; sun direction matches the DirectionalLight. ONE directional
-  light. Shadow camera fitted tight to the table, map 2048.
-- Post: EffectComposer with GTAO, UnrealBloom (threshold ≥ 0.9), SMAA, Output.
+  light. Shadow camera fitted tight to the table, map 2048 on the high
+  quality tier (1024 on mid/low).
+- Post: EffectComposer with GTAO (high tier only), UnrealBloom (threshold
+  ≥ 0.9; half-res chain on the low tier), SMAA, Output.
+- Quality tiers + dynamic resolution (docs/PERF.md): `src/render/quality.ts`
+  picks low/mid/high at boot from the GL renderer string (`?quality=`
+  overrides; harness mode defaults HIGH so captures stay pixel-stable) and
+  sets dpr cap / GTAO / transmission resolution / shadow size;
+  `src/render/dynres.ts` walks the render scale 0.7–1.0× inside the tier on
+  sustained frame-time over/under budget (off in harness). Drink templates
+  get a static same-material sub-mesh merge in `buildDrink`
+  (`src/drinks/lib/mergeStatic.ts`; `?mergeoff=1` disables for A/B).
+  `window.__perf` (tier, measure(), info(), templates()) is the probe API.
 - Camera: near end, elevation 38–45°, FOV ~40. Never moves during a pull.
-  Impact nudge: ≤ 5 px, 80–120 ms, along impact axis, force-gated.
+  Impact nudge: ≤ 5 px, 80–120 ms, along impact axis, gated + scaled by the
+  HORIZONTAL contact force (force · |normal_xz|, gate 40 N) so routine
+  vertical drop landings and light taps never move the screen.
 
 ### src/physics — world, slingshot, feel
 - `PhysicsWorld` wraps RAPIER.World (timestep 1/120, CCD on launched body),
@@ -107,8 +120,12 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
   physics, NEVER writes.
 
 ### src/merge — contact graph, snap & grow
-- Adjacency map from collision started/stopped events, per tier. On new
-  same-tier contact: BFS the component; if ≥ 3, take the 3 most recent
+- Adjacency map from collision started/stopped events, per tier, PLUS a
+  proximity slop: same-tier drinks whose footprint gap is < 5 mm count as
+  touching for the component BFS (the contact graph stays primary; the slop
+  only ADDS edges — it exists because a merge-grown drink can rest 1–4 mm
+  from its neighbours without Rapier ever reporting a contact pair, silently
+  missing the cascade). BFS the component; if ≥ 3, take the 3 most recent
   contacts, fire merge: bodies kinematic → pull to centroid + shrink
   120–200 ms → despawn → spawn next tier with collider radius growing
   0.4→1× over 180–300 ms, mesh ease-out-back in lockstep → small radial
@@ -123,14 +140,21 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
   `totalForceMagnitude`, brightness rises with force. Slide: filtered noise
   loop gated by `sliding` events. Merge: band-pass-swept pour + pop pitched
   down by tier.
+- Stereo: every impact voice, the slide loop, and each merge one-shot run
+  through a StereoPanner set by `panForX` (dsp.ts): table x ∈ [-0.4, 0.4] →
+  pan ±0.55. Impacts pan by the impact point's x, the slide loop by the
+  `sliding` event's speed-weighted centroid x (the event carries `x` now —
+  events.ts + world.ts), merges by the mergeDone centroid x.
 - Harness: `window.__audio.renderImpact(material, force): Promise<{env: number[], spectrum: number[]}>`
   via OfflineAudioContext so envelopes/spectra are verifiable headlessly.
   Extended (superset, `env`/`spectrum` unchanged): probes also carry `peak`,
   `rms`, `envelope` (= `env`), `spectrumFreqs`, `centroidHz`,
   `durationToMinus40dB`; plus `renderMerge(tier, chain?)`, `renderPileup()`
   (6 max-force voices through the master chain, peak must stay < 1),
-  `renderSurf()`, and `renderLevels()` (post-chain impact/merge/surf peaks +
-  dB ratios). renderImpact/renderMerge measure the recipe DIRECT (no chain):
+  `renderSurf()`, `renderLevels()` (post-chain impact/merge/surf peaks +
+  dB ratios), and `renderPan(x)` (stereo render of a glass impact through the
+  live pan law; reports panForX(x) AND the pan recovered from the rendered
+  L/R energy split — capture spec `pan:<x>`). renderImpact/renderMerge measure the recipe DIRECT (no chain):
   Chrome's compressor smears fast transients ~-12 dB level-independently and
   would pollute the gain-law/decay measurements; mix-level checks go through
   the chain via renderPileup/renderLevels. Driven by

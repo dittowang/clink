@@ -28,15 +28,41 @@ export interface HarnessApi {
   wipeSave?(): void
 }
 
+/**
+ * window.__perf — scriptable performance probes (docs/PERF.md). Installed by
+ * boot for every scene; implemented in src/render/quality.ts.
+ */
+export interface PerfApi {
+  /** quality tier picked at boot ('low' | 'mid' | 'high') */
+  tier: string
+  /** forced-sync render timing: N frames, readPixels after each, avg ms */
+  measure(frames?: number): { frames: number; msPerFrame: number }
+  /** tier + dpr + dynres scale + renderer.info totals for one full frame */
+  info(): {
+    tier: string
+    dpr: number
+    renderScale: number
+    drawCalls: number
+    triangles: number
+  }
+  /** per-tier drink template mesh counts before/after the static-merge pass */
+  templates(): unknown
+}
+
 declare global {
   interface Window {
     __game?: HarnessApi
     __ready?: boolean
+    __perf?: PerfApi
   }
 }
 
 export function registerHarness(api: HarnessApi): void {
   window.__game = api
+}
+
+export function registerPerf(api: PerfApi): void {
+  window.__perf = api
 }
 
 export function markReady(): void {

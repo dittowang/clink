@@ -9,8 +9,9 @@ import type * as THREE from 'three'
 export interface GameEvents {
   /** Rapier CONTACT_FORCE_EVENTS above threshold. force is totalForceMagnitude. */
   impact: { a: number; b: number; force: number; point: THREE.Vector3; normal: THREE.Vector3; tierA: TierId | null; tierB: TierId | null; matA: string; matB: string }
-  /** per-fixed-step aggregate sliding speed of every awake drink (audio loop gate) */
-  sliding: { speed: number; count: number }
+  /** per-fixed-step aggregate sliding speed of every awake drink (audio loop
+   *  gate); x = speed-weighted centroid of the sliders (slide-loop pan) */
+  sliding: { speed: number; count: number; x: number }
   launch: { id: number; tier: TierId; impulse: number }
   spawnDrop: { id: number; tier: TierId }
   /** three-of-a-kind fired: ids snapping to centroid, next tier appears */

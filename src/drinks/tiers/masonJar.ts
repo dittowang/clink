@@ -20,8 +20,9 @@ import {
  * barrel, fast shoulder, wide threaded neck, matte steel screw BAND riding
  * the threads LOW on the neck (the lowest ridge peeks below its skirt), a
  * full centimetre of naked glass rim standing proud ABOVE the band — the jar
- * is unmistakably OPEN: lemonade fills into the neck, so the mouth shows the
- * surface + ice + straw from the game camera. Pressed-glass C mug ear on +X,
+ * is unmistakably OPEN: lemonade fills to the SHOULDER, so the surface + ice
+ * read through the shoulder glass from game angles (a neck-high fill hid
+ * both behind the band — critic). Pressed-glass C mug ear on +X,
  * cloudy pale lemonade, 3 mostly-submerged ice lumps, lemon wheel on the rim.
  *
  * Band truth: skirt bottom at y .1368 overlaps the thread zone (.133–.146) —
@@ -34,9 +35,10 @@ export function buildMasonJar(): DrinkVisual {
   const H = def.height // 0.170
   const WALL = 0.0025
   const FLOOR_Y = 0.010
-  const FILL_Y = 0.147 // filled INTO the neck: the open mouth shows lemonade
-  // 2.3 cm below the rim (surface line at the side hides behind the band —
-  // exactly how a full drink jar photographs)
+  const FILL_Y = 0.122 // fill line ON the shoulder (barrel tops out at .108,
+  // band skirt starts at .1368): the surface + ice stay visible through the
+  // shoulder glass at game angles — the old neck-high .147 hid both behind
+  // the steel band, and the jar read as factory-sealed
 
   // ---- glass: outer profile, doubleWalledProfile derives the rest ---------
   // Straight barrel → fast mason shoulder → WIDE straight neck running up
@@ -98,18 +100,19 @@ export function buildMasonJar(): DrinkVisual {
       attenuationColor: 0x9c741c, // ramp floor: steeped-lemon olive, not mud
       roughness: 0.15,
     },
-    // overhang 6 mm: the fill line sits in the r ≈ .028 neck, so a tilted
-    // clip plane needs less headroom than the barrel — 6 mm covers 12°
-    { capLighten: 0.18, segments: 48, overhang: 0.006 }
+    // overhang 8 mm: the fill line sits on the r ≈ .032 shoulder, so a 12°
+    // tilted clip plane needs r·tan(12°) ≈ 7 mm of headroom
+    { capLighten: 0.18, segments: 48, overhang: 0.008 }
   )
 
-  // ---- ice: 3 lumps riding ~80% submerged, inside the neck bore -----------
+  // ---- ice: 3 lumps riding ~75% submerged, on the shoulder surface --------
   const ice = floatingIce({
     count: 3,
     size: 0.019,
     fillY: FILL_Y,
-    spreadRadius: 0.013, // bore r ≈ .028 at the fill line — keep lumps clear
-    freeboard: 0.24,
+    spreadRadius: 0.016, // inner r ≈ .032 at the shoulder fill line
+    freeboard: 0.28, // a touch prouder than the neck fill had: the lumps must
+    // break the surface visibly through the shoulder glass
     seed: 66,
     waterline: 0xbf9c4a, // lemonade surface tone, darkened — wet band at the line
   })
@@ -147,11 +150,14 @@ export function buildMasonJar(): DrinkVisual {
     [0.0313, 0.1540], //   …into the neck clearance gap
   ]
   const bandGeo = latheFromProfile(bandProfile, 72, { samples: 30 })
-  const bandMat = steel({ anisotropy: 0.5, seed: 61, envMapIntensity: 0.35 })
-  // matte band: the default 0.85 env under the hot beach sky blew the drum
-  // to enamel-white (and specular peaks past the 1.0 bloom threshold); the
-  // darker base tone pulls the read from cream plastic to satin steel
-  bandMat.color.set(0xc2c7cc)
+  const bandMat = steel({ anisotropy: 0.5, seed: 61, envMapIntensity: 0.55 })
+  // MID-GRAY base albedo: 0xc2c7cc still integrated the golden-hour sun into
+  // a near-white drum that read as white plastic at lineup distance (critic,
+  // rgb ≈ 224,221,216 sunlit). Metal F0 must hold value contrast — the gray
+  // base keeps the sunlit face a step below the highlight, while env 0.55
+  // (up from 0.35) keeps a real anisotropic specular streak on the knurl so
+  // the band stays METAL in full sun instead of matte putty
+  bandMat.color.set(0x878d94)
   bandMat.normalMap = ribNormalTexture(96, 2.4)
   bandMat.normalScale.set(0.55, 0.55)
   const band = new THREE.Mesh(bandGeo, bandMat)

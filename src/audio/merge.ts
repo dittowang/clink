@@ -1,4 +1,4 @@
-import { noiseBurst, partial, vary, whiteNoiseBuffer, type SourceSink } from './dsp'
+import { noiseBurst, panForX, partial, vary, whiteNoiseBuffer, type SourceSink } from './dsp'
 import { audio } from './engine'
 
 /**
@@ -96,10 +96,14 @@ export function scheduleMerge(
   return end - t0
 }
 
-export function playMerge(tier: number, chain: number): void {
+/** x = merge centroid's table x — the pour/pop comes from where it happened */
+export function playMerge(tier: number, chain: number, x = 0): void {
   const h = audio.playbackHandle()
   if (!h) return
-  scheduleMerge(h.ctx, h.fx, h.now + 0.01, tier, chain)
+  const panner = h.ctx.createStereoPanner()
+  panner.pan.value = panForX(x)
+  panner.connect(h.fx)
+  scheduleMerge(h.ctx, panner, h.now + 0.01, tier, chain)
 }
 
 /** soft lowpassed knock when the next drink lands in the cradle */

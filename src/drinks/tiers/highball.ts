@@ -171,10 +171,15 @@ export function buildHighball(): DrinkVisual {
     surfaceY: FILL_Y,
     spreadRadius: 0.024,
     seed: 55,
-    liquidTint: 0xd98402, // a step darker/redder than the body: the waterline
-    // must read as a wet JUICE line against the icy crown — tinting with the
-    // bright body color soaked the whole lump caramel-milk instead
-    liquidDeep: 0xa85e02,
+    submerge: [0.72, 0.84], // deeper than the lib default [0.6, 0.75]: at
+    // probe range the lumps read as bright frost cubes placed ON the surface
+    // (critic) — burying all but a shoulder leaves low wet crowns breaking
+    // the surface, which is what real 2 cm ice in juice does
+    liquidTint: 0xc27002, // two steps darker/redder than the body: the
+    // waterline must read as a wet JUICE line against the icy crown (the
+    // bright body color soaked the whole lump caramel-milk; the first darker
+    // pass at 0xd98402 was still a near-invisible seam at probe range)
+    liquidDeep: 0x7e4802,
   })
 
   // ---- straw --------------------------------------------------------------

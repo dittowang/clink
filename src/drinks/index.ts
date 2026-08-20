@@ -13,6 +13,7 @@ import { buildPitcher } from './tiers/pitcher'
 import { buildWatermelon } from './tiers/watermelon'
 import { buildIceBucket } from './tiers/iceBucket'
 import { buildDispenser } from './tiers/dispenser'
+import { mergeStaticMeshes, type MergeStats } from './lib/mergeStatic'
 
 const BUILDERS: Record<TierId, DrinkBuilder> = {
   1: buildJuiceBox,
@@ -31,11 +32,35 @@ const BUILDERS: Record<TierId, DrinkBuilder> = {
 
 const templateCache = new Map<TierId, DrinkVisual>()
 
+/**
+ * Draw-call diet (docs/PERF.md §3): per-template static merge stats, keyed by
+ * tier. Exposed through window.__perf.templates(). `?mergeoff=1` disables the
+ * pass (harness A/B captures).
+ */
+const mergeStats: Partial<Record<TierId, MergeStats>> = {}
+
+export function templateMergeStats(): Partial<Record<TierId, MergeStats>> {
+  return mergeStats
+}
+
+const staticMergeEnabled =
+  typeof window === 'undefined' ||
+  new URLSearchParams(window.location.search).get('mergeoff') !== '1'
+
 /** Build (once) and cache the template for a tier. Geometry + materials shared. */
 export function buildDrink(tier: TierId): DrinkVisual {
   let v = templateCache.get(tier)
   if (!v) {
     v = BUILDERS[tier]()
+    // post-pass: collapse static same-material sub-meshes (liquid meshes and
+    // any userData-flagged mesh are skipped — they are driven per instance)
+    if (staticMergeEnabled) {
+      const s = mergeStaticMeshes(v.template)
+      mergeStats[tier] = s
+      if (import.meta.env.DEV) {
+        console.log(`[drinks] tier ${tier} static-merge: ${s.before} -> ${s.after} meshes`)
+      }
+    }
     templateCache.set(tier, v)
   }
   return v

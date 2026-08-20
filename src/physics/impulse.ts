@@ -1,6 +1,7 @@
 import { PUSH_K, PUSH_ALPHA, MASS_KG } from '../config/massLadder'
 import { TIERS, type TierId } from '../config/tiers'
 import { tableFriction, LINEAR_DAMPING } from './materials'
+import { applyLaunchLeanKick } from './feel'
 import type { Drink } from '../core/drink'
 
 /**
@@ -32,13 +33,18 @@ const _imp = { x: 0, y: 0, z: 0 }
  */
 export function applyLaunch(drink: Drink, angleRad: number, pull01: number): void {
   const j = launchImpulse(drink.tier, pull01)
-  _imp.x = Math.sin(angleRad) * j
+  const dx = Math.sin(angleRad)
+  const dz = -Math.cos(angleRad)
+  _imp.x = dx * j
   _imp.y = 0
-  _imp.z = -Math.cos(angleRad) * j
+  _imp.z = dz * j
   drink.body.applyImpulse(_imp, true)
   // a full-pull can moves ~25 mm per 120 Hz step — CCD is cheap insurance
   // against clipping a 30 mm rail or a thin drink at launch speed
   drink.body.enableCcd(true)
+  // render-only: rock the visual BACK against the launch acceleration (the
+  // one-step Δv spike is invisible to the per-frame accel estimate — see feel.ts)
+  applyLaunchLeanKick(drink, dx, dz, j / MASS_KG[drink.tier])
 }
 
 /**

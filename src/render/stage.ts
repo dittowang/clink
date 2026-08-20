@@ -6,6 +6,8 @@ import { createBeach } from './beach'
 import { createTable, disposeTable, type TableBuildOpts } from './table'
 import { createPost } from './post'
 import { createCameraRig } from './camera'
+import { getQuality } from './quality'
+import { createDynRes } from './dynres'
 
 /**
  * The beach render stage — owns the scene, the one sun, the beach, the
@@ -52,7 +54,9 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
   // ONE directional light; hemisphere is fill only, never a shadow caster.
   const sun = new THREE.DirectionalLight(0xffffff, 3)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  // 2048 on the high tier; 1024 on mid/low (docs/PERF.md)
+  const shadowSize = getQuality().shadowMapSize
+  sun.shadow.mapSize.set(shadowSize, shadowSize)
   // fitted to table + enough margin that the low-sun table shadow on the
   // sand is never clipped (morning elev 17° throws ~2.4 m) — 2 mm/texel
   const sc = sun.shadow.camera
@@ -77,6 +81,14 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
 
   const env = createEnvironment(renderer, scene)
   const post = createPost(renderer, scene, rig.camera, { lowPower: opts.lowPower })
+
+  // dynamic resolution: steps the renderer pixel ratio 0.7–1.0× of the tier
+  // dpr on sustained over/under budget, resizing the composer through the
+  // same post.setSize path a window resize takes (camera aspect unchanged)
+  const dynres = createDynRes(renderer, () => {
+    const s = renderer.getSize(new THREE.Vector2())
+    post.setSize(s.x, s.y)
+  })
 
   const sunDir = new THREE.Vector3()
   let current: PresetName = opts.preset ?? 'golden'
@@ -118,6 +130,7 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
     },
     preset: () => current,
     render(dt) {
+      dynres.update()
       time += dt
       beach.update(time)
       rig.update(dt)

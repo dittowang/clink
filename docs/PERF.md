@@ -39,3 +39,25 @@ Render is the whole problem. Breakdown implied by the table:
    template (BufferGeometryUtils.mergeGeometries) — drinks are drawn ~3×
    (shadow + transmission + main); template mesh-count cuts multiply.
 4. Never regress: milestones' visual quality on high tier; captures compare.
+
+## Implemented 2026-08-21 (measured)
+
+- Quality tiers: `src/render/quality.ts` (boot detection from the GL renderer
+  string, `?quality=low|mid|high` override, harness defaults HIGH so captures
+  stay pixel-stable). Settings exactly as §1; low additionally runs the bloom
+  chain at half res. `window.__perf` = { tier, measure(frames), info(),
+  templates() }; measure() is the forced-sync readPixels probe above.
+- Dynamic resolution: `src/render/dynres.ts`, ticked in stage.render. EMA of
+  wall dt; >17.5 ms for >1 s → scale ×0.9 (floor 0.7), <13 ms for >2 s →
+  ÷0.9 (cap 1.0), 1 s cooldown, dead band between thresholds. Resizes
+  composer + GTAO + bloom via the post.setSize path. Verified live (dev Mac,
+  240-drink overload, merge pass off): scale walked 1.0 → 0.7 (dpr 2 → 1.4)
+  and back to 1.0 after the load cleared, no oscillation.
+- Draw-call diet: `src/drinks/lib/mergeStatic.ts` applied in buildDrink
+  (`?mergeoff=1` disables). Template meshes 154 → 84 total
+  (per tier 1..12: 6→3, 5→3, 7→4, 6→6, 8→5, 13→8, 5→5, 24→11, 11→7, 14→9,
+  23→8, 32→15; liquid volume/cap and userData-flagged meshes are never
+  merged). 61 settled drinks, high tier: **1966 → 1336 draw calls (−32%)**,
+  triangles identical (3,553,607). Real-GPU frame time at 61 drinks
+  (dev Mac, browser pane, dpr 2): 5.99 → 5.52 ms/frame; mid tier
+  (GTAO off, dpr 1.5): 3.46 ms/frame, 801 calls.

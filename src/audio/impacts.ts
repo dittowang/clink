@@ -1,5 +1,5 @@
 import type { SoundMaterial } from '../config/tiers'
-import { clamp01, noiseBurst, partial, rand, vary, type SourceSink } from './dsp'
+import { clamp01, noiseBurst, panForX, partial, rand, vary, type SourceSink } from './dsp'
 import { audio } from './engine'
 
 /**
@@ -237,10 +237,11 @@ export function scheduleImpact(
   return { duration, srcs: sink.srcs }
 }
 
-/** Live entry point wired by engine.subscribe(bus) to the `impact` event. */
-export function playImpact(matA: string, matB: string, force: number): void {
+/** Live entry point wired by engine.subscribe(bus) to the `impact` event.
+ *  x = impact point's table x — each clink comes from where it happened. */
+export function playImpact(matA: string, matB: string, force: number, x = 0): void {
   if (impactGain01(force) < 0.002) return // sub-audible; don't burn a voice
-  const v = audio.allocImpactVoice()
+  const v = audio.allocImpactVoice(panForX(x))
   if (!v) return
   const sv = scheduleImpact(v.ctx, v.out, v.now + 0.005, coerceMaterial(matA), coerceMaterial(matB), force)
   v.register(sv)

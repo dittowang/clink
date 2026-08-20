@@ -302,7 +302,13 @@ function buildBody(): BodyBuild {
 function buildTop(cutR: number, cutY: number): THREE.Group {
   const group = new THREE.Group()
   const fleshInnerR = 0.019 // recess radius (flesh wall)
-  const waterY = cutY - 0.004
+  // water rides 0.8 mm below the cut — BRIMFUL. The probe camera grazes the
+  // top at ~7° elevation: with a 4 mm recess the water hid behind the near
+  // rim and the pale FLESH WALL was all the interior showed (that wall, not
+  // the water, was the critic's "pale tan disc"; capture-diff verified the
+  // water contributed zero pixels). Brimful, the wall is sub-pixel from any
+  // angle and the visible interior IS the dark glossy water.
+  const waterY = cutY - 0.0008
 
   // cut face: planar-UV ring painted with concentric zones —
   // fibrous husk cross-section → thin dark shell → white flesh
@@ -387,15 +393,22 @@ function buildTop(cutR: number, cutY: number): THREE.Group {
   wall.castShadow = true
   wall.receiveShadow = true
 
-  // coconut water: plain dark glossy disc (deep-attenuation look)
+  // coconut water: NEAR-BLACK brown glossy disc (deep-attenuation look).
+  // The probe camera grazes the surface at ~7°, where F90 → 1 and the disc
+  // MIRRORS the warm horizon band regardless of albedo — env 1.3 rendered it
+  // pale tan (critic). Every specular path is trimmed hard (capture-measured
+  // ladder: spec .2/cc .25/env .12 still washed the sliver to rgb ≈ 129,105,81;
+  // this set lands ≈ 93,70,48 = dark chocolate over the 28,7,1 diffuse floor).
+  // Smooth roughness keeps the remaining reflection a tight sheen — the gloss
+  // hit — instead of a broad wash.
   const waterMat = new THREE.MeshPhysicalMaterial({
-    color: 0x2b1307,
+    color: 0x150a04,
     metalness: 0,
-    roughness: 0.05,
-    clearcoat: 1.0,
+    roughness: 0.06,
+    clearcoat: 0.1,
     clearcoatRoughness: 0.05,
-    specularIntensity: 1,
-    envMapIntensity: 1.3,
+    specularIntensity: 0.08,
+    envMapIntensity: 0.1,
   })
   const water = new THREE.Mesh(new THREE.CircleGeometry(fleshInnerR - 0.0005, 48), waterMat)
   water.rotation.x = -Math.PI / 2

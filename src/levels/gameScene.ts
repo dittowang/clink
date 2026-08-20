@@ -8,7 +8,7 @@ import {
   FOUL_GRACE_S,
   SETTLE_SPEED,
 } from '../config/table'
-import { type TierId } from '../config/tiers'
+import { TIERS, type TierId } from '../config/tiers'
 import { levelById, levelSeed, LEVELS, starsToUnlockChapter, type LevelDef } from '../config/levels'
 import { bus } from '../core/events'
 import { Rng, seedFromUrl } from '../core/rng'
@@ -51,10 +51,18 @@ import { createMenus } from '../ui/menus'
  * → slingshot + particles + dressing sway → sequences → stage.
  */
 
-/** impacts below this force (N) don't nudge the camera */
-const NUDGE_MIN_FORCE = 8
-/** force (N above the gate) that maps to a full-strength nudge */
-const NUDGE_FULL_FORCE = 70
+/**
+ * Camera-nudge force gate, in newtons of HORIZONTAL contact force
+ * (force · |normal_xz|). Calibrated from harness impact telemetry:
+ *   cradle drop landing ≈ 0 N horizontal (total ~54 N but the normal is +Y),
+ *   0.5 m/s can-on-can tap ≈ 18 N, full-pull can-on-can slam ≈ 68 N,
+ *   full-pull can into a side rail ≈ 117 N, pitcher/keg shoves ≥ 100 N.
+ * Gate at 40 N: taps and every routine landing stay still; only genuine
+ * slams move the camera, proportionally.
+ */
+const NUDGE_MIN_FORCE = 40
+/** horizontal force (N above the gate) that maps to a full-strength nudge */
+const NUDGE_FULL_FORCE = 160
 
 /** sand corpse lifetime after the thud, fade tail, and the corpse cap */
 const CORPSE_TTL_S = 2.5
@@ -67,6 +75,12 @@ const TRAY_SCALE = 0.8
 
 /** goal met → the completion sequence starts after this beat (lets pops land) */
 const COMPLETE_DELAY_S = 1.1
+
+/** the game-over panel waits for the camera rise to (mostly) finish */
+const END_MENU_DELAY_S = 1.15
+/** foul rise / complete drift durations (s) */
+const FOUL_RISE_S = 1.4
+const COMPLETE_DRIFT_S = 1.6
 
 /**
  * Slope creep — vibration-assisted stick-slip. Static friction (μ ≈ 0.31)
@@ -81,7 +95,9 @@ const CREEP_FORCE_MARGIN = 1.35 // fraction of the friction-beating force applie
 
 const _nudge2 = new THREE.Vector2()
 const _down = new THREE.Vector3(0, -1, 0)
+const _up = new THREE.Vector3(0, 1, 0)
 const _tmp = new THREE.Vector3()
+const _m4 = new THREE.Matrix4()
 const _imp = { x: 0, y: 0, z: 0 }
 
 function round3(v: number): number {
@@ -148,6 +164,18 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   let maxTierMade = 0
   let earnedStars = 0
   let seqT = 0 // drives the foul rise-tilt AND the complete drift-in
+  // end-sequence camera pose: BOTH position and orientation blend from the
+  // base pose to this — a raw lookAt() on frame 0 was a visible camera cut
+  const seqEndPos = new THREE.Vector3()
+  const seqEndQuat = new THREE.Quaternion()
+  let pendingEndMenu: (() => void) | null = null
+
+  /** aim the end-sequence pose: camera at `pos`, looking at (tx, ty, tz) */
+  function setSeqEndPose(px: number, py: number, pz: number, tx: number, ty: number, tz: number): void {
+    seqEndPos.set(px, py, pz)
+    _m4.lookAt(seqEndPos, _tmp.set(tx, ty, tz), _up)
+    seqEndQuat.setFromRotationMatrix(_m4)
+  }
 
   const foulWarned = new Set<number>()
   const corpses: Corpse[] = []
@@ -159,6 +187,20 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     logs.push({ t: round3(world.time), ev, ...fields })
     if (logs.length > 50) logs.shift()
   }
+
+  // harness-only impact telemetry (payload is reused — copy fields).
+  // hForce = force projected on the table plane: the camera-nudge gate input.
+  interface ImpactSample {
+    t: number
+    force: number
+    hForce: number
+    nx: number
+    ny: number
+    nz: number
+    matA: string
+    matB: string
+  }
+  const impactSamples: ImpactSample[] = []
 
   // ---- entity plumbing ----
 
@@ -316,6 +358,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     maxTierMade = 0
     earnedStars = 0
     seqT = 0
+    pendingEndMenu = null
+    hud.setFoulWarning(false)
     pushesLeft = def.goal.kind === 'survive' ? def.goal.pushes : def.pushes
 
     hud.setScore(0)
@@ -338,6 +382,10 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     if (outcome !== 'playing') return
     outcome = 'complete'
     seqT = 0
+    // gentle drift 14% of the way toward the table centre while the tally runs
+    _tmp.set(0, SURFACE_Y + 0.1, 0).sub(camBasePos).multiplyScalar(0.14).add(camBasePos)
+    setSeqEndPose(_tmp.x, _tmp.y, _tmp.z, 0, SURFACE_Y + 0.05, -0.55)
+    hud.setFoulWarning(false)
     turn.end()
     sling.cancel()
     sling.setActiveDrink(null)
@@ -354,6 +402,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   function doFail(): void {
     if (outcome !== 'playing') return
     outcome = 'failed'
+    hud.setFoulWarning(false)
     turn.end()
     sling.cancel()
     sling.setActiveDrink(null)
@@ -389,6 +438,12 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     if (outcome !== 'playing') return
     outcome = 'foul'
     seqT = 0
+    // rise + tilt-down over the table; blended in frameUpdate, never cut
+    setSeqEndPose(
+      camBasePos.x, camBasePos.y + 0.55, camBasePos.z + 0.15,
+      0, SURFACE_Y, 0.3
+    )
+    hud.setFoulWarning(false)
     turn.end()
     sling.cancel()
     sling.setActiveDrink(null)
@@ -398,26 +453,67 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     startOffenderPulse(offender)
     menuScreen = 'end'
     menus.setPauseButtonVisible(false)
+    // the panel waits for the camera rise — a full-opacity overlay one frame
+    // after play was the "hard cut" a smooth rise cannot hide
     if (def.goal.kind === 'endless') {
       const rank = recordEndlessScore(save, score)
       persistSave(save)
-      menus.showEndlessGameOver(score, rank)
+      pendingEndMenu = () => menus.showEndlessGameOver(score, rank)
     } else {
-      menus.showFoulGameOver(score)
+      pendingEndMenu = () => menus.showFoulGameOver(score)
     }
   }
 
   // ---- turn loop ----
 
+  /** clearance between the spawn's footprint and any resident drink (m) */
+  const CRADLE_CLEAR_M = 0.012
+  /** true when a drink of radius r can drop at (x, z) without overlap */
+  function cradleSpotFree(x: number, z: number, r: number): boolean {
+    for (const d of world.all) {
+      if (d.state === 'dead') continue
+      const dx = d.currPos.x - x
+      const dz = d.currPos.z - z
+      if (Math.hypot(dx, dz) < r + d.def.radius + CRADLE_CLEAR_M) return false
+    }
+    return true
+  }
+
+  // sidestep candidates when a drink is parked on the cradle spot — dropping
+  // the spawn into it popped the solver. Lateral first, all a few cm, all
+  // between the foul line and the open edge.
+  const CRADLE_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+    [0.07, 0], [-0.07, 0], [0.13, 0], [-0.13, 0],
+    [0.07, 0.05], [-0.07, 0.05], [0, 0.06], [0.2, 0], [-0.2, 0],
+  ]
+
   function spawnCradle(): void {
-    const d = world.spawnDrink(turn.currentTier, 0, CRADLE_Z, {
+    const tier = turn.currentTier
+    const r = TIERS[tier].radius
+    let sx = 0
+    let sz = CRADLE_Z
+    if (!cradleSpotFree(sx, sz, r)) {
+      for (const [ox, oz] of CRADLE_OFFSETS) {
+        const cx = ox
+        const cz = CRADLE_Z + oz
+        if (Math.abs(cx) > world.halfW - r - 0.01) continue
+        if (cz > NEAR_Z - r - 0.01 || cz < FOUL_Z + 0.03) continue
+        if (cradleSpotFree(cx, cz, r)) {
+          sx = cx
+          sz = cz
+          break
+        }
+      }
+      // all candidates blocked: fall back to the pad (pre-fix behaviour)
+    }
+    const d = world.spawnDrink(tier, sx, sz, {
       dropHeight: 0.05, // per the brief: 5 cm drop into the cradle
       state: 'cradle',
     })
     attach(d)
     cradle = d
     bus.emit('spawnDrop', { id: d.id, tier: d.tier })
-    log('spawnDrop', { id: d.id, tier: d.tier })
+    log('spawnDrop', { id: d.id, tier: d.tier, x: round3(sx), z: round3(sz) })
   }
 
   // ---- in-world next-drink tray (visual only, no physics) ----
@@ -534,6 +630,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   }
 
   function updateFoulAndSand(dt: number): void {
+    let foulDanger = false
     for (let i = world.all.length - 1; i >= 0; i--) {
       const d = world.all[i]
       if (d.state !== 'live') continue
@@ -557,10 +654,13 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       // completion beat must never be stolen by a teetering drink)
       if (outcome === 'playing' && !goalDone && d.currPos.z > FOUL_Z && d.speed < SETTLE_SPEED) {
         d.foulTime += dt
-        if (d.foulTime >= FOUL_GRACE_S * 0.4 && !foulWarned.has(d.id)) {
-          foulWarned.add(d.id)
-          bus.emit('foulWarning', { id: d.id, remaining: FOUL_GRACE_S - d.foulTime })
-          log('foulWarning', { id: d.id })
+        if (d.foulTime >= FOUL_GRACE_S * 0.4) {
+          foulDanger = true
+          if (!foulWarned.has(d.id)) {
+            foulWarned.add(d.id)
+            bus.emit('foulWarning', { id: d.id, remaining: FOUL_GRACE_S - d.foulTime })
+            log('foulWarning', { id: d.id })
+          }
         }
         if (d.foulTime >= FOUL_GRACE_S) triggerGameOver(d)
       } else {
@@ -568,6 +668,9 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
         foulWarned.delete(d.id)
       }
     }
+    // pill stays up (pulsing) for the whole tail of the grace window; the
+    // outcome handlers clear it the moment the consequence takes the screen
+    if (outcome === 'playing') hud.setFoulWarning(foulDanger)
 
     // corpses: thud on first sand contact, fade out, despawn
     for (let i = corpses.length - 1; i >= 0; i--) {
@@ -723,14 +826,32 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       log('launch', { id: e.id, tier: e.tier, impulse: round3(e.impulse) })
     })
   )
-  unsubs.push(bus.on('foulWarning', () => hud.flashFoulWarning()))
   unsubs.push(
     bus.on('impact', (e) => {
       // payload is REUSED by the physics layer — read fields, never retain
-      if (outcome !== 'playing' || paused || e.force < NUDGE_MIN_FORCE) return
+      const nh = Math.hypot(e.normal.x, e.normal.z)
+      const hForce = e.force * nh
+      if (ctx.harness) {
+        impactSamples.push({
+          t: round3(world.time),
+          force: round3(e.force),
+          hForce: round3(hForce),
+          nx: round3(e.normal.x),
+          ny: round3(e.normal.y),
+          nz: round3(e.normal.z),
+          matA: e.matA,
+          matB: e.matB,
+        })
+        if (impactSamples.length > 120) impactSamples.shift()
+      }
+      // nudge gate: HORIZONTAL force only, so a vertical cradle-drop landing
+      // (normal ≈ ±Y, huge total force) never shakes the screen. Strength is
+      // proportional above the gate — light clinks stay still, only genuine
+      // slams move the camera.
+      if (outcome !== 'playing' || paused || hForce < NUDGE_MIN_FORCE) return
       _nudge2.set(e.normal.x, -e.normal.z) // horizontal normal → screen axes
       if (_nudge2.lengthSq() < 1e-8) return
-      stage.nudge(_nudge2, Math.min(1, (e.force - NUDGE_MIN_FORCE) / NUDGE_FULL_FORCE))
+      stage.nudge(_nudge2, Math.min(1, (hForce - NUDGE_MIN_FORCE) / NUDGE_FULL_FORCE))
     })
   )
 
@@ -818,22 +939,28 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       dressing?.update(frameDt, world.time, windField?.strength01 ?? 0, windField?.dirX ?? 1)
 
       if (outcome === 'foul') {
-        // rise + tilt-down over the table; the offender pulses, the sea rolls
+        // rise + tilt-down over the table; the offender pulses, the sea rolls.
+        // Position AND orientation ease from the base pose — a lookAt() from
+        // frame 0 snapped the pitch instantly (a camera teleport).
         seqT += frameDt
-        const k = Math.min(1, seqT / 1.4)
-        const e = 1 - (1 - k) * (1 - k)
-        stage.camera.position.set(camBasePos.x, camBasePos.y + 0.55 * e, camBasePos.z + 0.15 * e)
-        stage.camera.lookAt(0, SURFACE_Y, 0.3)
+        const k = Math.min(1, seqT / FOUL_RISE_S)
+        const e = k * k * (3 - 2 * k) // smoothstep: the camera LIFTS off, no jolt
+        stage.camera.position.lerpVectors(camBasePos, seqEndPos, e)
+        stage.camera.quaternion.slerpQuaternions(camBaseQuat, seqEndQuat, e)
         const pulse = 0.5 + 0.5 * Math.sin(seqT * Math.PI * 2 * 1.4)
         for (const m of pulseEmissive) m.emissiveIntensity = 0.15 + 0.85 * pulse
+        if (pendingEndMenu && seqT >= END_MENU_DELAY_S) {
+          const show = pendingEndMenu
+          pendingEndMenu = null
+          show()
+        }
       } else if (outcome === 'complete') {
         // brief drift-in toward the table centre while the tally runs
         seqT += frameDt
-        const k = Math.min(1, seqT / 1.6)
+        const k = Math.min(1, seqT / COMPLETE_DRIFT_S)
         const e = k * k * (3 - 2 * k)
-        _tmp.set(0, SURFACE_Y + 0.1, 0).sub(camBasePos).multiplyScalar(0.14 * e)
-        stage.camera.position.copy(camBasePos).add(_tmp)
-        stage.camera.lookAt(0, SURFACE_Y + 0.05, -0.55)
+        stage.camera.position.lerpVectors(camBasePos, seqEndPos, e)
+        stage.camera.quaternion.slerpQuaternions(camBaseQuat, seqEndQuat, e)
       }
     },
 
@@ -921,6 +1048,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     }),
     /** ring buffer (50) of merge/score/turn events */
     logs: () => logs.slice(),
+    /** ring buffer (120) of impact events with horizontal-force breakdown */
+    impacts: () => impactSamples.slice(),
     loadLevel: (id: number): void => loadLevel(id),
     save: () => JSON.parse(JSON.stringify(save)) as unknown,
     wipeSave: (): void => {

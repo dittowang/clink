@@ -24,6 +24,7 @@ const CUTOFF_HI = 1800
 export class SlideVoice {
   private readonly gain: GainNode
   private readonly filter: BiquadFilterNode
+  private readonly panner: StereoPannerNode
   private lastWrite = -1
   private lastTarget = 0
   private idleWritten = false
@@ -38,12 +39,14 @@ export class SlideVoice {
     this.filter.Q.value = 0.8
     this.gain = ctx.createGain()
     this.gain.gain.value = 0
-    src.connect(this.filter).connect(this.gain).connect(dest)
+    this.panner = ctx.createStereoPanner()
+    src.connect(this.filter).connect(this.gain).connect(this.panner).connect(dest)
     src.start()
   }
 
-  /** speed-weighted loudness + brightness; no allocations (hot path) */
-  update(speed: number, now: number): void {
+  /** speed-weighted loudness + brightness, panned toward the sliding
+   *  centroid; no allocations (hot path) */
+  update(speed: number, pan: number, now: number): void {
     const s = Math.max(0, speed - MIN_SPEED)
     const target = Math.min(MAX_GAIN, s * GAIN_PER_MPS)
     const idle = target < 1e-4 && this.lastTarget < 1e-4
@@ -55,5 +58,7 @@ export class SlideVoice {
     const cutoff = Math.min(CUTOFF_HI, CUTOFF_LO + speed * 1400)
     this.gain.gain.setTargetAtTime(target, now, SMOOTH_S)
     this.filter.frequency.setTargetAtTime(cutoff, now, SMOOTH_S)
+    // same ~80 ms smoothing: the loop glides across the field with the pile
+    this.panner.pan.setTargetAtTime(pan, now, SMOOTH_S)
   }
 }

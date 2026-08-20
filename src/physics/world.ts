@@ -31,6 +31,29 @@ export interface SpawnOpts {
   state?: DrinkState
 }
 
+/**
+ * Level modifiers the world is built with (all additive; defaults reproduce
+ * the classic table exactly). slopeDeg tilts every TABLE collider (plank,
+ * rails, wet patch) with one rotation around X at the table centre
+ * (0, SURFACE_Y, 0) so the +Z (near/foul) edge drops; gravity stays -Y and
+ * drinks stay rotation-locked, so resting drinks feel downslope pull.
+ */
+export interface WorldMods {
+  /** playfield half-width; default TABLE.HALF_W */
+  halfW?: number
+  /** whole-table tilt in degrees; + drops the near (+Z) edge */
+  slopeDeg?: number
+  /** omit these side rail colliders (their handles become -1) */
+  removeRails?: ('left' | 'right')[]
+  /** thin low-friction strip ON the plank, centre (x,z), extents w × l */
+  wetPatch?: { x: number; z: number; w: number; l: number }
+}
+
+/** wet varnish: Min combine rule beats the drink's Average, so μ_eff = this */
+const WET_FRICTION = 0.03
+/** wet strip collider half-thickness (1.5 mm strip on the plank) */
+const WET_HALF_T = 0.00075
+
 /** ~2 N: a juice box set down gently is right at the edge of audibility. */
 const CONTACT_FORCE_THRESHOLD = 2
 
@@ -81,8 +104,17 @@ export class PhysicsWorld {
 
   readonly plankHandle: number
   readonly farRailHandle: number
+  /** -1 where the rail was removed by a level modifier */
   readonly sideRailHandles: [number, number]
   readonly sandHandle: number
+  /** handle of the wet-patch strip, or -1 when the level has none */
+  readonly wetPatchHandle: number = -1
+
+  /** effective playfield half-width (levels may narrow the table) */
+  readonly halfW: number
+  /** table tilt in radians (0 on flat levels) */
+  readonly slopeRad: number
+  private readonly slopeTan: number
 
   private readonly statics = new Map<number, StaticInfo>()
   /** pairKey → sim time until which a force event counts as a fresh impact */
@@ -163,27 +195,39 @@ export class PhysicsWorld {
     bus.emit('impact', _impact)
   }
 
-  constructor() {
+  constructor(mods: WorldMods = {}) {
     this.raw = new RAPIER.World({ x: 0, y: -9.81, z: 0 })
     this.raw.timestep = FIXED_DT
     this.queue = new RAPIER.EventQueue(true)
 
-    const { HALF_W, HALF_L, THICKNESS, RAIL_H, RAIL_T } = TABLE
+    const { HALF_L, THICKNESS, RAIL_H, RAIL_T } = TABLE
+    const HALF_W = (this.halfW = mods.halfW ?? TABLE.HALF_W)
+    this.slopeRad = ((mods.slopeDeg ?? 0) * Math.PI) / 180
+    this.slopeTan = Math.tan(this.slopeRad)
+
+    // whole-table tilt: one rotation about X at (0, SURFACE_Y, 0). Applied to
+    // every table collider via tilt(); positive slope drops the +Z near edge.
+    const sin = Math.sin(this.slopeRad)
+    const cos = Math.cos(this.slopeRad)
+    const q = { x: Math.sin(this.slopeRad / 2), y: 0, z: 0, w: Math.cos(this.slopeRad / 2) }
+    const tilt = (desc: RAPIER.ColliderDesc, cx: number, cy: number, cz: number): RAPIER.ColliderDesc => {
+      const ry = cy - SURFACE_Y
+      return desc
+        .setTranslation(cx, SURFACE_Y + ry * cos - cz * sin, ry * sin + cz * cos)
+        .setRotation(q)
+    }
 
     // plank top — the playfield
     this.plankHandle = this.addStatic(
-      RAPIER.ColliderDesc.cuboid(HALF_W, THICKNESS / 2, HALF_L).setTranslation(
-        0,
-        SURFACE_Y - THICKNESS / 2,
-        0
-      ),
+      tilt(RAPIER.ColliderDesc.cuboid(HALF_W, THICKNESS / 2, HALF_L), 0, SURFACE_Y - THICKNESS / 2, 0),
       TABLE_WOOD.friction,
       TABLE_WOOD.restitution,
       'wood'
     )
     // far rail — spans the full width plus both side-rail corners
     this.farRailHandle = this.addStatic(
-      RAPIER.ColliderDesc.cuboid(HALF_W + RAIL_T, RAIL_H / 2, RAIL_T / 2).setTranslation(
+      tilt(
+        RAPIER.ColliderDesc.cuboid(HALF_W + RAIL_T, RAIL_H / 2, RAIL_T / 2),
         0,
         SURFACE_Y + RAIL_H / 2,
         FAR_Z - RAIL_T / 2
@@ -193,18 +237,23 @@ export class PhysicsWorld {
       'wood'
     )
     // two side rails; the NEAR edge stays open — drinks pushed too far
-    // sideways stay in, drinks dragged off the near edge fall to the sand
+    // sideways stay in, drinks dragged off the near edge fall to the sand.
+    // Night levels may remove one or both (handle -1).
+    const removed = mods.removeRails ?? []
     const side = (sign: 1 | -1): number =>
-      this.addStatic(
-        RAPIER.ColliderDesc.cuboid(RAIL_T / 2, RAIL_H / 2, HALF_L).setTranslation(
-          sign * (HALF_W + RAIL_T / 2),
-          SURFACE_Y + RAIL_H / 2,
-          0
-        ),
-        TABLE_WOOD.friction,
-        TABLE_WOOD.restitution,
-        'wood'
-      )
+      removed.includes(sign < 0 ? 'left' : 'right')
+        ? -1
+        : this.addStatic(
+            tilt(
+              RAPIER.ColliderDesc.cuboid(RAIL_T / 2, RAIL_H / 2, HALF_L),
+              sign * (HALF_W + RAIL_T / 2),
+              SURFACE_Y + RAIL_H / 2,
+              0
+            ),
+            TABLE_WOOD.friction,
+            TABLE_WOOD.restitution,
+            'wood'
+          )
     this.sideRailHandles = [side(-1), side(1)]
     // the beach: a big slab whose top face is y = 0 — fallen drinks land here
     this.sandHandle = this.addStatic(
@@ -213,6 +262,34 @@ export class PhysicsWorld {
       SAND.restitution,
       'sand'
     )
+    // wet patch: 1.5 mm low-friction strip ON the plank. Min combine rule
+    // beats the drink's Average, so μ_eff = WET_FRICTION — on sloped tables
+    // (tan 2.5° ≈ 0.044 > 0.03) drinks parked on it genuinely slide.
+    if (mods.wetPatch) {
+      const wp = mods.wetPatch
+      const desc = tilt(
+        RAPIER.ColliderDesc.cuboid(wp.w / 2, WET_HALF_T, wp.l / 2),
+        wp.x,
+        SURFACE_Y + WET_HALF_T,
+        wp.z
+      )
+        .setFriction(WET_FRICTION)
+        .setRestitution(TABLE_WOOD.restitution)
+        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
+        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Average)
+      const col = this.raw.createCollider(desc)
+      const t = col.translation()
+      this.statics.set(col.handle, { label: 'wood', pos: new THREE.Vector3(t.x, t.y, t.z) })
+      this.wetPatchHandle = col.handle
+    }
+  }
+
+  /**
+   * World-space plank-top height at world z (the tilted plane through the
+   * table centre). Spawn, cradle, merge growth and dressing all sit on this.
+   */
+  surfaceYAt(z: number): number {
+    return SURFACE_Y - this.slopeTan * z
   }
 
   private addStatic(
@@ -260,7 +337,8 @@ export class PhysicsWorld {
     const def = TIERS[tier]
     const m = MASS_KG[tier]
     const drop = opts?.dropHeight ?? 0.004
-    const y = SURFACE_Y + def.height / 2 + drop
+    // sloped levels: spawn height follows the local plank height at z
+    const y = this.surfaceYAt(z) + def.height / 2 + drop
 
     const body = this.raw.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()

@@ -19,6 +19,13 @@ export interface HarnessApi {
   state(): unknown
   /** stop-distance log for the ladder scene, metres from launch */
   logs?(): unknown
+  // ---- game-scene extensions (additive; absent on debug scenes) ----
+  /** load a campaign level (1..24) or endless (0) in place */
+  loadLevel?(id: number): void
+  /** snapshot of the persisted save (stars, endless top-5, locale, muted) */
+  save?(): unknown
+  /** QA: clear clink.save.v1 and the in-memory stars/leaderboard */
+  wipeSave?(): void
 }
 
 declare global {

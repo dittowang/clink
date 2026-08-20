@@ -3,7 +3,7 @@ import { SURFACE_Y } from '../config/table'
 import { PRESETS, sunDirection, type PresetName, type LightingPreset } from './presets'
 import { createEnvironment } from './environment'
 import { createBeach } from './beach'
-import { createTable } from './table'
+import { createTable, disposeTable, type TableBuildOpts } from './table'
 import { createPost } from './post'
 import { createCameraRig } from './camera'
 
@@ -24,6 +24,11 @@ export interface Stage {
   sun: THREE.DirectionalLight
   tableGroup: THREE.Group
   setPreset(p: PresetName): void
+  /**
+   * Swap the table visuals for a level's build (narrow / tilted / railless).
+   * Additive: never called → the classic table from construction stands.
+   */
+  rebuildTable(opts: TableBuildOpts): void
   /** renders through the composer; dt in seconds drives sea + nudge springs */
   render(dt: number): void
   onResize(w: number, h: number): void
@@ -67,7 +72,7 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
   const beach = createBeach(maxAniso)
   scene.add(beach.group)
 
-  const tableGroup = createTable(maxAniso)
+  let tableGroup = createTable(maxAniso)
   scene.add(tableGroup)
 
   const env = createEnvironment(renderer, scene)
@@ -98,10 +103,18 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
     scene,
     camera: rig.camera,
     sun,
-    tableGroup,
+    get tableGroup() {
+      return tableGroup
+    },
     setPreset(p) {
       current = p
       applyPreset(PRESETS[p])
+    },
+    rebuildTable(tableOpts) {
+      scene.remove(tableGroup)
+      disposeTable(tableGroup)
+      tableGroup = createTable(maxAniso, tableOpts)
+      scene.add(tableGroup)
     },
     preset: () => current,
     render(dt) {

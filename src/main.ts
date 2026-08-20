@@ -23,8 +23,9 @@ export interface BootCtx {
 }
 
 async function boot(): Promise<void> {
-  const stored = localStorage.getItem('clink.locale')
-  setLocale(stored === 'zh-CN' || stored === 'en' ? stored : detectLocale())
+  // locale persistence lives in clink.save.v1 (applied when the game scene
+  // loads its save); boot just picks the browser default for debug scenes
+  setLocale(detectLocale())
 
   await RAPIER.init()
 

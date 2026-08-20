@@ -100,9 +100,14 @@ lemon wheels pressed against the inside wall (visible through glass),
 condensation.
 
 **10 · Watermelon keg** (rind, r .095 h .200) — melon = sphere squashed to
-0.72, wavy dark/light green stripes (12–14 meridian stripes with jittered
-edges painted on canvas) under a waxy clearcoat; sits on a tiny wooden
-X-cradle (two crossed planks, reuse wood tones); top cut open: pink flesh
+0.78, wavy dark/light green stripes (12–14 meridian stripes with jittered
+edges painted on canvas) under a waxy clearcoat; rests LOW on a tiny wooden
+X-block (two short crossed boards, ~14% of the melon's height, bite curves
+following the melon's lower arc). NOTE: the visual tops out at the cut lip
+≈ 0.147, below the tier's collider H — an oblate melon is at most 2·0.78·r
+tall, and pinning the lip at H forced a full-height pedestal that killed the
+silhouette ("mushroom on a plinth"); identity is WIDTH + tap nub, not
+height. Top cut open: green skin sliver → white inner-rind ring → pink flesh
 annulus + slightly sunken pink disc with seed specks; brass/steel TAP at the
 front lower third (small lathe: flange, barrel, downturned nozzle, lever).
 

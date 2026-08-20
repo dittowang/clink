@@ -48,6 +48,15 @@ export function mergeScore(resultTier: TierId, chain: number): number {
   return Math.round(resultTier * resultTier * 10 * Math.pow(1.5, chain - 1))
 }
 
+/**
+ * CONFIG (level modifiers): local plank-top height at world z. Sloped levels
+ * override this with world.surfaceYAt so the grow animation seats the new
+ * drink on the tilted plank; the level scene resets it on level load.
+ */
+export const mergeSurface = {
+  yAt: (_z: number): number => SURFACE_Y,
+}
+
 function easeOutBack(t: number): number {
   const c1 = 1.70158
   const c3 = c1 + 1
@@ -188,7 +197,7 @@ export class MergeSystem {
     this.bus.emit('mergeStart', {
       ids: three.map((d) => d.id),
       tier,
-      centroid: new THREE.Vector3(cx, SURFACE_Y, cz),
+      centroid: new THREE.Vector3(cx, mergeSurface.yAt(cz), cz),
       chain: predicted,
     })
   }
@@ -262,7 +271,7 @@ export class MergeSystem {
     this.bus.emit('mergeDone', {
       newId: drink.id,
       tier: newTier,
-      centroid: new THREE.Vector3(job.cx, SURFACE_Y + def.height, job.cz),
+      centroid: new THREE.Vector3(job.cx, mergeSurface.yAt(job.cz) + def.height, job.cz),
       chain: this.chain,
       score,
     })
@@ -283,7 +292,7 @@ export class MergeSystem {
       const def = d.def
       const s = GROW_FROM + (1 - GROW_FROM) * k // collider: linear, no overshoot
       d.collider.setShape(new RAPIER.Cylinder((def.height / 2) * s, def.radius * s))
-      _v.set(g.cx, SURFACE_Y + (def.height / 2) * s, g.cz)
+      _v.set(g.cx, mergeSurface.yAt(g.cz) + (def.height / 2) * s, g.cz)
       d.body.setNextKinematicTranslation(_v)
       // mesh overshoots past 1 and settles — lockstep with the collider ramp
       d.visual.scale.setScalar(GROW_FROM + (1 - GROW_FROM) * easeOutBack(k))

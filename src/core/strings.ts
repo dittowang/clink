@@ -38,6 +38,8 @@ const TABLE = {
   off:              { en: 'Off', 'zh-CN': '关' },
   language:         { en: 'Language', 'zh-CN': '语言' },
   starsToUnlock:    { en: '{n} ★ to unlock', 'zh-CN': '需要 {n} ★ 解锁' },
+  levelFailed:      { en: 'Out of Pushes', 'zh-CN': '推动次数用完' },
+  back:             { en: 'Back', 'zh-CN': '返回' },
   foulWarn:         { en: 'Over the line!', 'zh-CN': '越线警告！' },
   lostToSand:       { en: 'Lost to the sand', 'zh-CN': '掉进沙子里了' },
   leaderboard:      { en: 'Local Best', 'zh-CN': '本地最佳' },

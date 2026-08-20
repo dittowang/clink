@@ -26,7 +26,6 @@ const CANCEL_PULL = 0.05
 const AIM_Y = SURFACE_Y + 0.003
 
 const _ndc = new THREE.Vector2()
-const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -SURFACE_Y)
 const _hit = new THREE.Vector3()
 const _pullMove: GameEvents['pullMove'] = { pull01: 0 }
 
@@ -44,6 +43,10 @@ export class SlingshotController {
   private dirX = 0
   private dirZ = -1
   private pulseT = 0
+  /** table tilt (levels): pull plane + aim visuals follow the tilted plank */
+  private slopeTan = 0
+  private halfW: number = TABLE.HALF_W
+  private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -SURFACE_Y)
 
   private readonly raycaster = new THREE.Raycaster()
   private readonly line: THREE.Mesh
@@ -107,6 +110,38 @@ export class SlingshotController {
 
   get isPulling(): boolean {
     return this.pulling
+  }
+
+  /**
+   * Additive (level modifier): follow a table tilted by slopeDeg around X at
+   * the table centre — the drag plane and the aim visuals hug the real plank.
+   */
+  setSlope(slopeDeg: number): void {
+    const rad = (slopeDeg * Math.PI) / 180
+    this.slopeTan = Math.tan(rad)
+    this.plane.normal.set(0, Math.cos(rad), Math.sin(rad))
+    this.plane.constant = -SURFACE_Y * Math.cos(rad)
+    this.ring.rotation.x = -Math.PI / 2 + rad
+  }
+
+  /** Additive (level modifier): clamp the stop marker inside a narrowed table. */
+  setTableHalfW(halfW: number): void {
+    this.halfW = halfW
+  }
+
+  /** plank-top y at world z under the current slope */
+  private yAt(z: number): number {
+    return SURFACE_Y - this.slopeTan * z
+  }
+
+  /**
+   * Additive: abort an in-progress pull (resize / orientation change / pause).
+   * Emits 'pullCancel' so audio/UI treat it exactly like a drag-back cancel.
+   */
+  cancel(): void {
+    if (!this.pulling) return
+    this.endPull()
+    this.bus.emit('pullCancel', {})
   }
 
   get currentPull(): number {
@@ -190,7 +225,7 @@ export class SlingshotController {
       -((e.clientY - rect.top) / rect.height) * 2 + 1
     )
     this.raycaster.setFromCamera(_ndc, this.camera)
-    return this.raycaster.ray.intersectPlane(_plane, _hit) !== null
+    return this.raycaster.ray.intersectPlane(this.plane, _hit) !== null
   }
 
   /** recompute pull/aim from _hit and refresh visuals + 'pullMove' */
@@ -225,9 +260,9 @@ export class SlingshotController {
     // stop marker at origin + dir · predicted, clamped inside the rails
     const dist = predictStopDistance(d.tier, this.pull01)
     const r = d.def.radius
-    const mx = clamp(this.originX + this.dirX * dist, -TABLE.HALF_W + r, TABLE.HALF_W - r)
+    const mx = clamp(this.originX + this.dirX * dist, -this.halfW + r, this.halfW - r)
     const mz = clamp(this.originZ + this.dirZ * dist, FAR_Z + r, NEAR_Z)
-    this.ring.position.set(mx, AIM_Y, mz)
+    this.ring.position.set(mx, this.yAt(mz) + 0.003, mz)
 
     // tapered quad from drink edge to the marker; wide at the drink, thin far
     const px = -this.dirZ
@@ -237,17 +272,19 @@ export class SlingshotController {
     const sx = this.originX + this.dirX * r
     const sz = this.originZ + this.dirZ * r
     const a = this.linePos.array as Float32Array
+    const sy = this.yAt(sz) + 0.003
+    const my = this.yAt(mz) + 0.003
     a[0] = sx + px * w0
-    a[1] = AIM_Y
+    a[1] = sy
     a[2] = sz + pz * w0
     a[3] = sx - px * w0
-    a[4] = AIM_Y
+    a[4] = sy
     a[5] = sz - pz * w0
     a[6] = mx + px * w1
-    a[7] = AIM_Y
+    a[7] = my
     a[8] = mz + pz * w1
     a[9] = mx - px * w1
-    a[10] = AIM_Y
+    a[10] = my
     a[11] = mz - pz * w1
     this.linePos.needsUpdate = true
   }

@@ -1,15 +1,13 @@
-import type { Rng } from '../core/rng'
 import type { TierId } from '../config/tiers'
 import { TURN_TIMEOUT_S } from '../config/table'
 
 /**
- * TurnManager — the draw stream + turn phase timers, per docs/GAME.md.
+ * TurnManager — turn phase timers + the two-slot draw queue, per docs/GAME.md.
  *
- * Endless-lite v1: uniform draws from the pool off the seeded Rng (the
- * weighted director arrives later). `currentTier` is what sits (or will sit)
- * in the cradle; `nextTier` is what the in-world tray shows. The next drink
- * is drawn AT LAUNCH (per the spec), so the tray refreshes the moment the
- * current one flies.
+ * Draws come from the injected `draw` (the SpawnDirector's weighted stream).
+ * `currentTier` is what sits (or will sit) in the cradle; `nextTier` is what
+ * the in-world tray shows. The next drink is drawn AT LAUNCH (per the spec),
+ * so the tray refreshes the moment the current one flies.
  *
  * Phases:
  *   drop — the cradle drink is falling in; after DROP_SETTLE_S it's aimable
@@ -36,16 +34,9 @@ export class TurnManager {
   turns = 0
   private t = 0
 
-  constructor(
-    private readonly rng: Rng,
-    private readonly pool: readonly TierId[]
-  ) {
+  constructor(private readonly draw: () => TierId) {
     this.currentTier = this.draw()
     this.nextTier = this.draw()
-  }
-
-  private draw(): TierId {
-    return this.rng.pick(this.pool)
   }
 
   /** the cradle drink launched: shift the queue, draw the new tray drink */

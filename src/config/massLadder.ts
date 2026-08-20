@@ -30,12 +30,34 @@ export const MASS_KG: Readonly<Record<number, number>> = {
 
 /**
  * Impulse law: J = PUSH_K * pull01 * m^PUSH_ALPHA.
- * ALPHA 0.62 sits in the briefed 0.5-0.8 band: launch speed v = J/m ~ m^-0.38,
- * so stop distance (v^2 / 2*mu*g) ~ m^-0.76 — a slim can at full pull travels
- * ~2.1x as far as a mason jar, which is the "read the weight from the slide"
- * window. PUSH_K is calibrated in the ladder harness scene until tier 1 at
- * full pull stops 10-20% short of the far rail and tier 12 just crosses the
- * midline of the playfield.
+ *
+ * ALPHA 0.92 — ABOVE the briefed 0.5-0.8 band (and above the 0.85 allowance),
+ * and it has to be. Stop distance scales as m^(2a-2) / mu_eff, and the ladder
+ * harness targets pin both ends AND the middle:
+ *   - tier 1 full pull must stop 1.25-1.4 m out (10-20% short of the far rail)
+ *   - tier 12 must still cross the midline (>= ~0.85 m)
+ *   - stop distances must fall MONOTONICALLY through all 12 tiers
+ * Friction is per SoundMaterial (physics/materials.ts), and GLASS backs tiers
+ * 4, 5, 6, 9 and 12 — a 9.1x mass span sharing one mu. Within that group the
+ * distance ratio is purely (m4/m12)^(2a-2) = 9.09^(2-2a); for tier 4 to land
+ * below tier 3 (~1.2 m) while tier 12 still reaches ~0.86 m, 2-2a must be
+ * <= ~0.16, i.e. ALPHA >= ~0.92. At the briefed 0.8 (or even 0.85) tier 4
+ * would out-slide tier 1 by half a metre or tier 12 would die at ~0.55 m —
+ * verified in the ladder harness, not just on paper. The band was written
+ * assuming friction could fall freely with tier; the material table can't do
+ * that with glass at both ends of the ladder.
+ *
+ * Consequences, measured in ?scene=ladder (capture --scene=ladder --state):
+ *   - full-pull stops descend ~1.38 -> ~0.86 m; adjacent gaps 2.7-6.2 cm
+ *     (biggest low on the ladder where stop distance is the weight-read;
+ *     tiers 10-12 differ ~3 cm because up there reluctance-to-move reads the
+ *     weight, per the MASS_KG rationale above)
+ *   - launch speeds still fall with mass (v ~ m^-0.08 gives 3.0 -> 2.3 m/s),
+ *     so heavier drinks read slower AND shorter, just less steeply than the
+ *     original band assumed.
+ *
+ * PUSH_K 2.66 calibrated in the ladder harness: tier 1 full pull stops ~16%
+ * short of the far rail, tier 12 crosses the midline by ~8 cm.
  */
-export const PUSH_ALPHA = 0.62
-export const PUSH_K = 2.35
+export const PUSH_ALPHA = 0.92
+export const PUSH_K = 2.66

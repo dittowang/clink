@@ -125,6 +125,21 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
   down by tier.
 - Harness: `window.__audio.renderImpact(material, force): Promise<{env: number[], spectrum: number[]}>`
   via OfflineAudioContext so envelopes/spectra are verifiable headlessly.
+  Extended (superset, `env`/`spectrum` unchanged): probes also carry `peak`,
+  `rms`, `envelope` (= `env`), `spectrumFreqs`, `centroidHz`,
+  `durationToMinus40dB`; plus `renderMerge(tier, chain?)`, `renderPileup()`
+  (6 max-force voices through the master chain, peak must stay < 1),
+  `renderSurf()`, and `renderLevels()` (post-chain impact/merge/surf peaks +
+  dB ratios). renderImpact/renderMerge measure the recipe DIRECT (no chain):
+  Chrome's compressor smears fast transients ~-12 dB level-independently and
+  would pollute the gain-law/decay measurements; mix-level checks go through
+  the chain via renderPileup/renderLevels. Driven by
+  `capture.mjs --audio="impact:glass:8" | "merge:5[:chain]" | "pileup" |
+  "surf" | "levels" | "matrix" | comma-list` (loads the game scene, injects
+  `src/audio/offline.ts`, writes JSON to `--out`).
+- Integration: `subscribe(bus)` + `resumeOnGesture(el)` from
+  `src/audio/engine.ts` — one call each; `audio.setMuted(b)` applies mute
+  (persistence is the caller's job).
 
 ### src/levels — game scene, director, HUD, menus, persistence
 - Owns `createGameScene`, level defs (4 chapters × 6 + endless), spawn

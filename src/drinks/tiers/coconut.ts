@@ -88,10 +88,16 @@ function buildBody(): BodyBuild {
     const nF = (fbm3(nx * 10.5, ny * 10.5 + 3.1, nz * 10.5, 2, SEED + 83) - 0.5) * 3
     // spec: fBm ±8% — the clamp IS the spec amplitude (±4.6 mm at r=0.058)
     const lump = Math.max(-0.085, Math.min(0.085, nC * 0.055 + nM * 0.045 + nF * 0.016))
-    // ridges converge toward the poles like real husk seams; sin(theta)
-    // also zeroes them at the bottom pole so coincident pole verts agree
-    const ridge = ridgeAmount(u) * 0.085 * Math.pow(Math.sin(theta), 0.7)
-    const d = 1 + rimFade * (lump + ridge)
+    // three-lobe cross-section (rounded triangle, phase-locked to RIDGE_U):
+    // real drinking coconuts are three gentle FACES meeting at seams. The
+    // lobe puts the bands into the FORM — each face takes a different key
+    // angle so all three seams read (paint alone gave one smeared band), and
+    // the silhouette stays organic at every yaw of the turntable.
+    const lobe = 0.03 * Math.cos((u - RIDGE_U[0]) * Math.PI * 6) * Math.pow(Math.sin(theta), 0.55)
+    // sharper crest ON the lobe corner; sin(theta) zeroes both at the bottom
+    // pole so coincident pole verts agree, rimFade keeps the cut rim a circle
+    const ridge = ridgeAmount(u) * 0.065 * Math.pow(Math.sin(theta), 0.7)
+    const d = 1 + rimFade * (lump + lobe + ridge)
     let x = nx * d * A
     let y = CY + ny * d * B
     let z = nz * d * A
@@ -182,7 +188,7 @@ function buildBody(): BodyBuild {
             const gw = RIDGE_SIGMA * 0.8 * w
             const gg = ctx.createLinearGradient(gx - gw, 0, gx + gw, 0)
             gg.addColorStop(0, 'rgba(38,20,7,0)')
-            gg.addColorStop(0.5, 'rgba(38,20,7,0.4)')
+            gg.addColorStop(0.5, 'rgba(38,20,7,0.5)')
             gg.addColorStop(1, 'rgba(38,20,7,0)')
             ctx.fillStyle = gg
             ctx.fillRect(gx - gw, 0, gw * 2, h)
@@ -191,7 +197,7 @@ function buildBody(): BodyBuild {
           ctx.globalCompositeOperation = 'screen'
           const cg = ctx.createLinearGradient(cx - cw, 0, cx + cw, 0)
           cg.addColorStop(0, 'rgba(228,190,140,0)')
-          cg.addColorStop(0.5, 'rgba(228,190,140,0.18)')
+          cg.addColorStop(0.5, 'rgba(228,190,140,0.22)')
           cg.addColorStop(1, 'rgba(228,190,140,0)')
           ctx.fillStyle = cg
           ctx.fillRect(cx - cw, 0, cw * 2, h)
@@ -222,30 +228,32 @@ function buildBody(): BodyBuild {
     { repeat: [1, 1] }
   )
 
-  // height for the normal map: fine directional fibers over mid knots over
-  // coarse lumps. Full-contrast fiber layer + strong conversion — at 0.7
-  // normalScale / 3.2 strength the relief was invisible (critic-verified:
-  // "fiber exists only as painted color streaks")
+  // height for the normal map: STRAND-scale fiber bundles over mid knots
+  // over coarse lumps. The old 200-cell fiber lattice was sub-pixel on a
+  // 5.8 cm body and mip-filtered to nothing (critic: "fiber normal map
+  // produces no light response") — real husk strands clump ~3 mm wide, which
+  // is ~110 around the circumference. Contrast expanded ([0.28,0.72] remap)
+  // + a strong conversion so the key light actually breaks on the strands.
   const heightCanvas = document.createElement('canvas')
   heightCanvas.width = 512
   heightCanvas.height = 512
   {
     const ctx = heightCanvas.getContext('2d')!
     ctx.drawImage(
-      noiseCanvas(512, 512, 4, SEED + 3, { cellsX: 200, cellsY: 6, range: [0.12, 0.88] }),
+      noiseCanvas(512, 512, 3, SEED + 3, { cellsX: 110, cellsY: 4, range: [0.28, 0.72] }),
       0,
       0
     )
-    ctx.globalAlpha = 0.5
+    ctx.globalAlpha = 0.45
     ctx.drawImage(noiseCanvas(512, 512, 3, SEED + 7, { cellsX: 26, cellsY: 9 }), 0, 0)
-    ctx.globalAlpha = 0.4
+    ctx.globalAlpha = 0.35
     ctx.drawImage(noiseCanvas(512, 512, 3, SEED + 4, { cellsX: 9, cellsY: 5 }), 0, 0)
     ctx.globalAlpha = 1
   }
   const normalTex = makeCanvasTexture(
     512,
     512,
-    (ctx) => ctx.drawImage(normalMapFromHeight(heightCanvas, 5.0), 0, 0),
+    (ctx) => ctx.drawImage(normalMapFromHeight(heightCanvas, 7.0), 0, 0),
     { srgb: false, repeat: [1, 1] }
   )
 
@@ -267,11 +275,11 @@ function buildBody(): BodyBuild {
   const mat = new THREE.MeshPhysicalMaterial({
     map: colorTex,
     normalMap: normalTex,
-    normalScale: new THREE.Vector2(1.35, 1.35),
+    normalScale: new THREE.Vector2(1.6, 1.6),
     metalness: 0,
     roughness: 1.0, // roughnessMap carries absolute values (green channel)
     roughnessMap: roughTex,
-    specularIntensity: 0.5,
+    specularIntensity: 0.7,
     // lift the ambient response: the lineup's golden hour backlights the
     // drinks and the camera side lives on env light alone
     envMapIntensity: 1.4,
@@ -279,6 +287,10 @@ function buildBody(): BodyBuild {
     sheenRoughness: 0.8,
     sheenColor: new THREE.Color(0xc09a70),
   })
+  // highlight stretched ALONG the strands (rotation π/2 = along v): the key
+  // draws elongated fiber glints instead of a broad dielectric smear
+  mat.anisotropy = 0.55
+  mat.anisotropyRotation = Math.PI / 2
   const mesh = new THREE.Mesh(geo, mat)
   mesh.castShadow = true
   mesh.receiveShadow = true

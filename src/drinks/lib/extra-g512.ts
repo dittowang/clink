@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { Rng } from '../../core/rng'
 import { makeCanvasTexture } from './canvas'
 import { noiseCanvas } from './noise'
+import { lastLiquidTint } from './liquid'
 
 /**
  * Group-512 extras: helpers tiers 5 + 12 need that the shared lib does not
@@ -45,6 +46,12 @@ export interface RadialRibOpts {
    * groove sharpening exponent applied to the wave (0..1 of a rib period).
    * 1 = pure cos (soft). < 1 fattens the convex flutes and creases the
    * grooves — pressed-glass look, and the creases are what catch highlights.
+   * > 1 narrows the crests into proud RIDGES over a smooth base — the ONLY
+   * regime that scallops the outline: a lathe's silhouette is its support
+   * function, so with N wide flutes the neighbouring crest rules the limb
+   * and the dip caps at R·(1 − cos(π/N)) (~1 mm at N=24) regardless of
+   * amplitude; narrow ridges let the outline drop to the base radius between
+   * them, exposing the full amplitude. Give ridges ≥ 8 radial verts each.
    */
   grooveSharpness?: number
 }
@@ -131,8 +138,22 @@ export interface FloatingIceOpts {
   /** max radial distance of cube centres from the axis */
   spreadRadius: number
   seed?: number
-  /** submerged fraction of the cube height, default 0.5–0.68 randomized */
+  /** submerged fraction of the cube height, default 0.56–0.72 randomized */
   submerge?: readonly [number, number]
+  /**
+   * Liquid SURFACE tone. When set, each lump gets baked vertex colors keyed
+   * on drink-local height: saturated liquid tint at/below the waterline
+   * climbing ~2 mm up the lump (capillary wet film), decaying to a faint
+   * glow at the top — the read that the lump sits IN the liquid, not on it.
+   * Without it the lumps are chalk-white marshmallows placed on a table
+   * (critic-verified failure). Pass the liquid body/surface color.
+   * Default: the body color of the most recent buildLiquid() call (builders
+   * create the liquid before its ice), so untinted call sites still get the
+   * waterline read.
+   */
+  liquidTint?: THREE.ColorRepresentation
+  /** deeper liquid tone for the submerged fringe, default liquidTint × 0.72 */
+  liquidDeep?: THREE.ColorRepresentation
 }
 
 /** continuous low-frequency warp field — same value for coincident verts */
@@ -176,7 +197,13 @@ function iceLumpGeometry(size: number, seed: number): RoundedBoxGeometry {
  */
 function iceLumpMaterial(seed: number): THREE.MeshPhysicalMaterial {
   const map = makeCanvasTexture(128, 128, (ctx, w, h) => {
-    ctx.fillStyle = '#f3f8fc'
+    ctx.fillStyle = '#f7f6f2' // WARM-neutral white, deliberately: the game
+    // lineup camera is backlit, so lump faces live in open shade lit by blue
+    // sky irradiance — a cool albedo multiplies that into blue-violet candy
+    // (capture-verified at #ecf3fa, #eff5fa AND #f4f7fa; trimming clearcoat
+    // barely moved it — it is the DIFFUSE ambient, not a mirror). The warm
+    // base cancels toward the blue-GRAY of tier 11's bucket heap, the one
+    // ice read the critic passed; the cold cast comes free from the sky.
     ctx.fillRect(0, 0, w, h)
     // internal depth: soft darker blue-gray blobs (reads as seeing INTO the cube)
     const rng = new Rng(seed + 40)
@@ -185,8 +212,8 @@ function iceLumpMaterial(seed: number): THREE.MeshPhysicalMaterial {
       const y = rng.next() * h
       const r = rng.range(0.12, 0.28) * w
       const g = ctx.createRadialGradient(x, y, r * 0.15, x, y, r)
-      g.addColorStop(0, 'rgba(150,180,202,0.26)')
-      g.addColorStop(1, 'rgba(150,180,202,0)')
+      g.addColorStop(0, 'rgba(152,180,200,0.2)')
+      g.addColorStop(1, 'rgba(152,180,200,0)')
       ctx.fillStyle = g
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
@@ -225,13 +252,19 @@ function iceLumpMaterial(seed: number): THREE.MeshPhysicalMaterial {
     color: 0xffffff,
     map,
     metalness: 0,
-    roughness: 0.34, // scales the map: absolute range ≈ 0.06–0.34
+    roughness: 0.4, // scales the map: absolute range ≈ 0.07–0.4
     roughnessMap,
     ior: 1.31,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.06,
+    // clearcoat 1.0 @ rough 0.06 was a SKY MIRROR: at the backlit game angle
+    // every up-facing crown reflected pure blue sky and the lumps rendered as
+    // blue-violet candy tiles (capture-verified in the 5+9 lineup — trimming
+    // the map's blue did nothing). Soft coat keeps wet glints w/o the mirror.
+    clearcoat: 0.5,
+    clearcoatRoughness: 0.22,
     specularIntensity: 1,
-    envMapIntensity: 1.35,
+    envMapIntensity: 1.15, // 1.35 mirrored the bright warm env across every
+    // face (chalk); ~1.15 keeps enough warm sun in the backlit shade that the
+    // lumps stay ice-white instead of sky-blue at game distance
   })
   return mat
 }
@@ -245,14 +278,30 @@ function iceLumpMaterial(seed: number): THREE.MeshPhysicalMaterial {
 export function floatingIce(opts: FloatingIceOpts): THREE.Group {
   const rng = new Rng(opts.seed ?? 7)
   const size = opts.size
-  const [sub0, sub1] = opts.submerge ?? [0.5, 0.68]
+  const [sub0, sub1] = opts.submerge ?? [0.6, 0.75]
   const geos = [
     iceLumpGeometry(size, (opts.seed ?? 7) * 13 + 1),
     iceLumpGeometry(size, (opts.seed ?? 7) * 13 + 2),
     iceLumpGeometry(size, (opts.seed ?? 7) * 13 + 3),
   ]
   const mat = iceLumpMaterial(opts.seed ?? 7)
+  // No explicit tint → fall back to the drink the tier just built: every
+  // builder creates its liquid BEFORE the ice floating in it, so the registry
+  // holds the right color. Keeps untinted call sites (tier 12) waterlined.
+  const tint =
+    opts.liquidTint !== undefined
+      ? new THREE.Color(opts.liquidTint)
+      : lastLiquidTint()?.body ?? null
+  const deep =
+    opts.liquidDeep !== undefined
+      ? new THREE.Color(opts.liquidDeep)
+      : tint?.clone().multiplyScalar(0.72) ?? null
+  if (tint) mat.vertexColors = true
   const group = new THREE.Group()
+  const v = new THREE.Vector3()
+  const liq = new THREE.Color()
+  const out = new THREE.Color()
+  const white = new THREE.Color(0xffffff)
   for (let i = 0; i < opts.count; i++) {
     const mesh = new THREE.Mesh(geos[i % geos.length], mat)
     const a = (i / opts.count) * Math.PI * 2 + rng.range(-0.55, 0.55)
@@ -263,8 +312,43 @@ export function floatingIce(opts: FloatingIceOpts): THREE.Group {
       opts.surfaceY + size * (0.5 - submerge),
       Math.sin(a) * rad
     )
-    mesh.rotation.set(rng.range(-0.45, 0.45), rng.range(0, Math.PI * 2), rng.range(-0.45, 0.45))
+    mesh.rotation.set(rng.range(-0.3, 0.3), rng.range(0, Math.PI * 2), rng.range(-0.3, 0.3))
     mesh.scale.set(rng.range(0.86, 1.12), rng.range(0.9, 1.05), rng.range(0.86, 1.12))
+    if (tint && deep) {
+      // bake the waterline into per-vertex color (multiplies the frost map):
+      // the geometry becomes per-mesh (transform-dependent), so clone it.
+      // Bands are PROPORTIONAL to lump size (absolute 2 mm bands vanished on
+      // the dispenser's 31 mm lumps — they read as white foam puffs at trio
+      // distance), in drink-local height above the fill plane:
+      //   dy ≤ 0            submerged fringe — deep liquid tone
+      //   0…+0.06·size      the WATERLINE — saturated wet film climbing up
+      //   …+0.42·size       decay to a faint through-glow at the crown
+      mesh.updateMatrix()
+      const geo = mesh.geometry.clone()
+      const pos = geo.getAttribute('position') as THREE.BufferAttribute
+      const colors = new Float32Array(pos.count * 3)
+      const bandTop = size * 0.12
+      const decay = size * 0.26 // fast: the crown must return to frost-white
+      // (0.34 left a caramel wash over the whole visible lump)
+      for (let k = 0; k < pos.count; k++) {
+        v.fromBufferAttribute(pos, k).applyMatrix4(mesh.matrix)
+        const dy = v.y - opts.surfaceY
+        // the band at the surface stays DEEP-toned: it moonlights as the
+        // meniscus/contact shadow that grounds the lump in the liquid (a
+        // tint-bright band read as caramel soak, not as sitting IN liquid)
+        liq.copy(deep).lerp(tint, smooth01((dy - bandTop) / (decay * 0.55)))
+        const mix =
+          dy <= bandTop
+            ? 0.95
+            : Math.max(0.08, 0.95 * (1 - smooth01((dy - bandTop) / decay)))
+        out.copy(white).lerp(liq, mix)
+        colors[k * 3] = out.r
+        colors[k * 3 + 1] = out.g
+        colors[k * 3 + 2] = out.b
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+      mesh.geometry = geo
+    }
     mesh.castShadow = true
     group.add(mesh)
   }

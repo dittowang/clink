@@ -2,21 +2,31 @@ import * as THREE from 'three'
 import type { DrinkVisual } from '../types'
 import { TIERS } from '../../config/tiers'
 import { latheFromProfile, doubleWalledProfile, type ProfilePoint } from '../lib/profiles'
-import { glass, steel } from '../lib/materials'
+import { steel } from '../lib/materials'
 import { buildLiquid } from '../lib/liquid'
 import { makeCondensation } from '../lib/condensation'
 import { bentStraw } from '../lib/parts'
-import { citrusWheel, tubeHandle, solidGlass, ribNormalTexture, floatingIce } from '../lib/extra-g69'
+import {
+  citrusWheel,
+  tubeHandle,
+  solidGlass,
+  ribNormalTexture,
+  floatingIce,
+  crispGlass,
+} from '../lib/extra-g69'
 
 /**
  * Tier 6 — mason-jar lemonade. Classic canning-jar silhouette: straight
- * barrel, fast shoulder, wide threaded neck, matte steel screw BAND (open —
- * no lid: the glass rim rises clear ABOVE the band top, so the sky reads
- * through the naked lip), pressed-glass C mug ear on +X, cloudy pale
- * lemonade, 3 mostly-submerged ice lumps, straw, a lemon wheel on the rim.
+ * barrel, fast shoulder, wide threaded neck, matte steel screw BAND riding
+ * the threads LOW on the neck (the lowest ridge peeks below its skirt), a
+ * full centimetre of naked glass rim standing proud ABOVE the band — the jar
+ * is unmistakably OPEN: lemonade fills into the neck, so the mouth shows the
+ * surface + ice + straw from the game camera. Pressed-glass C mug ear on +X,
+ * cloudy pale lemonade, 3 mostly-submerged ice lumps, lemon wheel on the rim.
  *
- * Band truth: the skirt hugs the neck (0.8 mm clearance), its bottom edge
- * meets the top thread ridge — engaged, not hovering. R = 0.048, H = 0.170.
+ * Band truth: skirt bottom at y .1368 overlaps the thread zone (.133–.146) —
+ * screwed ON, not hovering; the rolled top curls in at .157 and the glass
+ * bead + lip run .166–.170 clear above it. R = 0.048, H = 0.170.
  */
 export function buildMasonJar(): DrinkVisual {
   const def = TIERS[6]
@@ -24,7 +34,9 @@ export function buildMasonJar(): DrinkVisual {
   const H = def.height // 0.170
   const WALL = 0.0025
   const FLOOR_Y = 0.010
-  const FILL_Y = 0.112 // lemonade level — meniscus just under the shoulder
+  const FILL_Y = 0.147 // filled INTO the neck: the open mouth shows lemonade
+  // 2.3 cm below the rim (surface line at the side hides behind the band —
+  // exactly how a full drink jar photographs)
 
   // ---- glass: outer profile, doubleWalledProfile derives the rest ---------
   // Straight barrel → fast mason shoulder → WIDE straight neck running up
@@ -56,44 +68,50 @@ export function buildMasonJar(): DrinkVisual {
   const glassGeo = latheFromProfile(full, 72, { samples: 96 })
 
   const condensation = makeCondensation(512, 1024, 6, {
-    baseRoughness: 0.05, // fog feeds the 0.6× transmission buffer's blur —
-    dropletRoughness: 0.025, // keep the wall clear, droplets carry the cold
+    baseRoughness: 0.05, // roughness map goes UNUSED (see crispGlass) —
+    dropletRoughness: 0.025, // only the droplet normals ride the clearcoat
+    density: 0.6, // sparse: cold hint, not frost
     normalStrength: 2.6,
   })
-  condensation.roughnessMap.repeat.set(2, 1)
   condensation.normalMap.repeat.set(2, 1)
-  const glassMat = glass({
+  const glassMat = crispGlass({
     wallThickness: WALL,
-    roughnessMap: condensation.roughnessMap,
-    normalMap: condensation.normalMap,
-    normalScale: 0.7,
     envMapIntensity: 1.5,
+    condensationNormalMap: condensation.normalMap,
+    normalScale: 0.55,
   })
   const glassMesh = new THREE.Mesh(glassGeo, glassMat)
   glassMesh.castShadow = false // transmission-lit; the liquid casts instead
   glassMesh.receiveShadow = false
 
-  // ---- lemonade: cloudy — soft gloss, hot sunny yellow for AgX ------------
+  // ---- lemonade: cloudy PALE yellow on the lib depth-ramp recipe ----------
+  // The old deep-gold 0xe4ad1c + roughness 0.22 read as opaque custard. Pale
+  // high-value base (the ramp still drops the floor to an olive-dark deep, so
+  // light visibly penetrates), moderate roughness for cloud — the lib's
+  // hue-locked sheen + clearcoat keep it wet rather than chalky.
   const lemonade = buildLiquid(
     inner,
     FILL_Y,
     {
-      color: 0xe4ad1c, // AgX + warm env lighten ~2 stops — author deep gold
-      attenuationColor: 0xbd8408,
-      attenuationDistance: 0.015,
-      roughness: 0.22, // cloudier than clear juice, not chalk
+      color: 0xe2c685, // authored at hue ~43° — the lib recipe's +7° hue
+      // shift lands it on sunny lemon ~50°, not chartreuse-olive
+      attenuationColor: 0x9c741c, // ramp floor: steeped-lemon olive, not mud
+      roughness: 0.15,
     },
-    { capLighten: 0.15, segments: 48 }
+    // overhang 6 mm: the fill line sits in the r ≈ .028 neck, so a tilted
+    // clip plane needs less headroom than the barrel — 6 mm covers 12°
+    { capLighten: 0.18, segments: 48, overhang: 0.006 }
   )
 
-  // ---- ice: 3 lumps riding ~80% submerged ---------------------------------
+  // ---- ice: 3 lumps riding ~80% submerged, inside the neck bore -----------
   const ice = floatingIce({
     count: 3,
     size: 0.019,
     fillY: FILL_Y,
-    spreadRadius: 0.016,
+    spreadRadius: 0.013, // bore r ≈ .028 at the fill line — keep lumps clear
     freeboard: 0.24,
     seed: 66,
+    waterline: 0xbf9c4a, // lemonade surface tone, darkened — wet band at the line
   })
 
   // ---- thread ridges: 3 clear-glass tori on the neck ----------------------
@@ -110,24 +128,30 @@ export function buildMasonJar(): DrinkVisual {
     threads.add(t)
   }
 
-  // ---- screw band: open steel ring ENGAGING the neck ----------------------
-  // Skirt inner r 0.0316 over the 0.0308 neck; bottom edge lands on the top
-  // thread ridge (y 0.1458 + tube ≈ 0.147). Rolled top curls in only to the
-  // neck — the glass lip continues up PAST it, reading unmistakably open.
+  // ---- screw band: short steel ring SCREWED ONTO the threads --------------
+  // The old band sat 0.147–0.166: a tall bright drum ABOVE the thread zone
+  // that read as a sealing cap over exposed threads. Now the skirt spans the
+  // threads themselves (.1368–.156): the lowest ridge peeks below the bottom
+  // edge (screwed on), the rolled top curls in at .157, and ~1.3 cm of naked
+  // glass neck + rim bead rise clear above — open jar.
   const bandProfile: ProfilePoint[] = [
-    [0.0318, 0.1468], // bottom edge, on the top thread
-    [0.0334, 0.1471], // bottom curl
-    [0.0341, 0.1488],
-    [0.0342, 0.1530], // knurled skirt wall
-    [0.0342, 0.1592],
-    [0.0338, 0.1626],
-    [0.0327, 0.1648], // rolled shoulder
-    [0.0319, 0.1655], // top flat — 1.5 mm PROUD of it the glass bead flares
-    [0.0315, 0.1648], // curls down the inside…
-    [0.0314, 0.1620], //   …into the neck clearance gap
+    [0.0322, 0.1368], // bottom edge, riding the lowest thread ridge
+    [0.0336, 0.1373], // bottom curl
+    [0.0342, 0.1392],
+    [0.0343, 0.1440], // knurled skirt wall
+    [0.0343, 0.1500],
+    [0.0339, 0.1535],
+    [0.0329, 0.1560], // rolled shoulder
+    [0.0320, 0.1572], // narrow top roll — a band edge, not a lid face
+    [0.0314, 0.1566], // curls down the inside…
+    [0.0313, 0.1540], //   …into the neck clearance gap
   ]
   const bandGeo = latheFromProfile(bandProfile, 72, { samples: 30 })
-  const bandMat = steel({ anisotropy: 0.5, seed: 61 })
+  const bandMat = steel({ anisotropy: 0.5, seed: 61, envMapIntensity: 0.35 })
+  // matte band: the default 0.85 env under the hot beach sky blew the drum
+  // to enamel-white (and specular peaks past the 1.0 bloom threshold); the
+  // darker base tone pulls the read from cream plastic to satin steel
+  bandMat.color.set(0xc2c7cc)
   bandMat.normalMap = ribNormalTexture(96, 2.4)
   bandMat.normalScale.set(0.55, 0.55)
   const band = new THREE.Mesh(bandGeo, bandMat)

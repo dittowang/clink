@@ -263,11 +263,15 @@ export function buildJuiceBox(): DrinkVisual {
   earL.rotation.z = -0.16
 
   // ---- glossy bent straw through the sloped top panel ---------------------
+  // Pierces the +X CORNER of the front sloped panel (spec: "rising from a
+  // corner"). Emergence x ~0.015 vs panel edge ~0.0178 there — as far out as
+  // the punch hole can sit while the 1.6 mm tube stays on the panel and clear
+  // of the folded ear at x = 0.0174. Tip stays inside footprint r = 0.026.
   const straw = bentStraw({
     radius: 0.0016,
-    bottom: [0.011, 0.093, 0.0045],
-    bendStart: [0.0128, 0.1125, 0.0055],
-    tip: [0.023, 0.1235, 0.0055],
+    bottom: [0.0146, 0.093, 0.0046],
+    bendStart: [0.0154, 0.1125, 0.0054],
+    tip: [0.0235, 0.1235, 0.008],
     color: 0xffffff,
     stripe: 0xf07301,
   })

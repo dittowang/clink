@@ -170,26 +170,30 @@ export function buildSodaBottle(): DrinkVisual {
   // Lithographed PAINT, not tinted chrome: high metalness mirrored the golden
   // sun disc off the cap top at ~HDR sky radiance and crossed the bloom
   // threshold (white-hot flare + halo in lineup trios). Dielectric red albedo
-  // with a restrained clearcoat keeps the enamel gloss while the specular
-  // peak stays under the bloom cut.
+  // with a restrained clearcoat keeps the enamel gloss. Critic r2 still saw
+  // flare at threshold 0.95; the post cut moved to 1.0 AND the specular
+  // energy here is trimmed further (rougher coat, env clamped ≤ 0.5) so the
+  // sun mirror stays sub-1.0 radiance at golden — verified: no near-white
+  // pixel on the cap in &only=3,4,5 or the tier-4 probe, and the paint reads
+  // a deeper red because less sky washes over it.
   const capMat = new THREE.MeshPhysicalMaterial({
     color: 0xc41708,
     metalness: 0.18,
-    roughness: 0.42,
-    specularIntensity: 0.45,
+    roughness: 0.48,
+    specularIntensity: 0.35,
     clearcoat: 0.3,
-    clearcoatRoughness: 0.32,
-    envMapIntensity: 0.7,
+    clearcoatRoughness: 0.4,
+    envMapIntensity: 0.5,
     side: THREE.DoubleSide, // skirt underside shows at game angles
   })
   const capTopMat = new THREE.MeshPhysicalMaterial({
     map: capTopTexture,
     metalness: 0.15,
-    roughness: 0.44,
-    specularIntensity: 0.35, // the up-facing disc sees the whole golden sky —
-    clearcoat: 0.22, //          keep its sheen below a desaturating wash
-    clearcoatRoughness: 0.34,
-    envMapIntensity: 0.6,
+    roughness: 0.5,
+    specularIntensity: 0.3, // the up-facing disc sees the whole golden sky —
+    clearcoat: 0.18, //         keep its sheen below a desaturating wash
+    clearcoatRoughness: 0.42,
+    envMapIntensity: 0.45,
   })
   const cap = crownCap({
     radius: 0.0165,

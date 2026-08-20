@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import type { DrinkVisual } from '../types'
 import { TIERS } from '../../config/tiers'
 import {
@@ -20,6 +19,7 @@ import {
   satinSteel,
   woodMaterial,
 } from '../lib/extra-g512'
+import { polishedMetal, hexNutGeometry } from '../lib/extra-g1011'
 
 /**
  * Tier 12 — glass drink dispenser. THE BOSS. A fat 16-flute pressed-glass jar
@@ -42,11 +42,25 @@ export function buildDispenser(): DrinkVisual {
   const FILL_Y = 0.245 // 70% of the jar interior
   const RIBS = 24 // per spec — and 24 divides both lathes' radial segments,
   // so every rib is sampled crest→mid→groove→mid identically (no aliasing)
-  const RIB_AMP = 0.0055 // flute depth; crests (0.1287) stay inside the footprint
-  const RIB_Y: readonly [number, number] = [0.064, 0.282]
-  const RIB_SHARP = 1.0 // pure cosine: even flutes with grooves WIDE enough to
-  // scallop the silhouette. The old 0.4 fattened the crests so much that the
-  // outline became the crest envelope — a clean arc, i.e. "smooth glass".
+  const RIB_AMP = 0.0065 // rib relief; belly crests (0.1297) stay inside R
+  // Band runs over the WHOLE shoulder (termination tucks under the lid
+  // skirt: mouth crests 0.0907 < skirt 0.0918) and down the base round-over.
+  // On a vertical wall the limb azimuth is constant per height, so vertical
+  // ribs can NEVER scallop the vertical silhouette — the outline only
+  // scallops where the wall turns. Ending the flutes at 0.282 was why the
+  // outline stayed a clean arc: the shoulder, the one region that CAN
+  // scallop, was left smooth.
+  const RIB_Y: readonly [number, number] = [0.058, 0.316]
+  // Glass ribs must be NARROW PROUD RIDGES (sharpness > 1), not wide cosine
+  // flutes: the silhouette of a lathe is its support function, so with 24
+  // wide flutes the neighbouring crest always rules the limb and the outline
+  // dip caps at R·(1 − cos 7.5°) ≈ 1 mm no matter the amplitude — a clean
+  // arc (both 0.4 and 1.0 were tried; both read as smooth glass). With
+  // narrow ridges over a smooth base the outline drops to the BASE radius
+  // between ridges: the full 6.5 mm relief, read at the shoulder turn.
+  const GLASS_RIB_SHARP = 2.2
+  const LIQUID_RIB_SHARP = 1.0 // the liquid keeps wide cosine flutes — its
+  // job is the broad diffuse rib shading on the orange body, not the outline
 
   const template = new THREE.Group()
 
@@ -89,10 +103,32 @@ export function buildDispenser(): DrinkVisual {
     [0.101, 0.0512], // top face
     [0.095, 0.0505],
   ]
-  const skirt = new THREE.Mesh(latheFromProfile(skirtProfile, 40, { samples: 20 }), wood)
+  // partial lathe: a 26° notch centred on +Z (lathe phi 0 = +Z) so the stand
+  // never crowds the spigot — the boss's tap must read at trio distance, not
+  // vanish behind the skirt lip. The profile is a closed loop, so the two cut
+  // ends are capped with thin wood slabs to hide the hollow cross-section.
+  const NOTCH = THREE.MathUtils.degToRad(26)
+  const skirtGeo = new THREE.LatheGeometry(
+    sampleProfile(skirtProfile, 20),
+    40,
+    NOTCH / 2,
+    Math.PI * 2 - NOTCH
+  )
+  const skirt = new THREE.Mesh(skirtGeo, wood)
   skirt.castShadow = true
   skirt.receiveShadow = true
   template.add(skirt)
+  const capGeo = new THREE.BoxGeometry(0.0022, 0.028, 0.017)
+  for (const side of [-1, 1]) {
+    const cap = new THREE.Mesh(capGeo, wood)
+    const a = (side * NOTCH) / 2 // cut-plane azimuth off +Z
+    const rMid = 0.1025
+    cap.position.set(Math.sin(a) * rMid, 0.0376, Math.cos(a) * rMid)
+    cap.rotation.y = a
+    cap.castShadow = true
+    cap.receiveShadow = true
+    template.add(cap)
+  }
 
   // ---- jar: double-walled fluted glass -----------------------------------
   const outer: ProfilePoint[] = [
@@ -113,17 +149,18 @@ export function buildDispenser(): DrinkVisual {
     [0.084, 0.318], // mouth top (lip closed by doubleWalledProfile)
   ]
   const { full, inner } = doubleWalledProfile(outer, WALL, FLOOR_Y)
-  // 144 radial segments = 6 verts per rib (flutes resolve); 44 profile rows
-  // claw back most of the triangle cost (flutes are vertical — vertical
-  // resolution is cheap to give up on a big smooth jar)
-  const glassGeo = latheFromProfile(full, 144, { samples: 44 })
+  // 168 radial segments = 7 verts per rib, crest-aligned — a sharpness-2.2
+  // ridge is only ~2.6° wide at half height and 144 segs (2.5° spacing)
+  // aliased it to facets; 44 rows keep the shoulder band (where the flutes
+  // now terminate and the outline scallops) resolved vertically
+  const glassGeo = latheFromProfile(full, 168, { samples: 44 })
   applyRadialRibs(glassGeo, {
     ribs: RIBS,
     amplitude: RIB_AMP,
     yRange: RIB_Y,
     feather: 0.014,
     outerPoints: sampleProfile(outer, 160),
-    grooveSharpness: RIB_SHARP,
+    grooveSharpness: GLASS_RIB_SHARP,
   })
 
   const condensation = makeCondensation(1024, 1024, 12, {
@@ -149,12 +186,15 @@ export function buildDispenser(): DrinkVisual {
     inner,
     FILL_Y,
     {
-      // sunset orange, deeper than the highball's OJ. The old 0xbb2e00
-      // (hue 15) rendered PINK — AgX + warm key + white speculars eat ~8° of
-      // hue and the chroma, so the authored color sits a step greener and
-      // brighter than the target render.
-      color: 0xd85102,
-      attenuationColor: 0x9a3a00,
+      // sunset orange-RED, target RENDERED hue ≈ 15–18 — a full step redder
+      // than the highball's OJ (renders ≈ 30+) so the two never rhyme.
+      // AgX compresses authored hue moves ~3:1 (authored 22 → rendered 24.5,
+      // authored 12 → rendered 21 measured on the probe), so landing under
+      // 18 takes an authored hue ~8. Value sits LOW (0.72): AgX drags
+      // bright saturates toward white, so the dense sunset read must be
+      // authored as pigment depth.
+      color: 0xb81f06,
+      attenuationColor: 0x741d02,
       attenuationDistance: 0.03,
       roughness: 0.05,
     },
@@ -167,10 +207,20 @@ export function buildDispenser(): DrinkVisual {
     const vm = brew.volumeMesh.material as THREE.MeshPhysicalMaterial
     vm.specularIntensity = 0.32
     vm.clearcoat = 0.22
+    vm.envMapIntensity = 0.8 // sharp env mirror of the bright warm sky is an
+    // additive white wash — the main desaturator pulling sunset red to salmon
+    vm.color.setScalar(0.88) // multiplies the depth ramp: AgX's chroma
+    // compression grows with luminance, so −12% luminance buys the rendered
+    // body ~+0.05 saturation (measured slope ≈ −1 sat/val on the probe)
     const cm = brew.capMesh.material as THREE.MeshPhysicalMaterial
     cm.specularIntensity = 0.22
     cm.clearcoat = 0.12
     cm.roughness = 0.16
+    cm.envMapIntensity = 0.7
+    cm.color.setHex(0x7e1c04) // the sky-facing disc catches 2–4× the wall's
+    // irradiance — the ramp's lightened surface tone rendered it salmon-PINK
+    // (the critic's read), and even 0xa82706 came back at sat 0.35. The
+    // sunset surface must be authored near-maroon to RENDER sunset.
   }
   // the liquid takes the fluted interior shape — this is what makes the ribs
   // READ: diffuse shading on the orange body, not just glass highlights
@@ -180,7 +230,7 @@ export function buildDispenser(): DrinkVisual {
     yRange: RIB_Y,
     feather: 0.014,
     outerPoints: sampleProfile(offsetProfile(inner, 0.0005), 160),
-    grooveSharpness: RIB_SHARP,
+    grooveSharpness: LIQUID_RIB_SHARP,
   })
   // widen the cap disc so the surface still meets the (now fluted) wall
   const capScale = (brew.spec.capRadius + RIB_AMP) / brew.spec.capRadius
@@ -233,26 +283,34 @@ export function buildDispenser(): DrinkVisual {
 
   // ---- ice at the surface -------------------------------------------------
   // centres BELOW the fill plane: lumps ride ~2/3 submerged in the opaque
-  // brew with shoulders proud — the old proud float read as marshmallows
+  // brew with shoulders proud — the old proud float read as marshmallows.
+  // liquidTint bakes a vertex-color waterline (wet sunset film climbing the
+  // lump) — without it the lumps rendered as white foam puffs at trio range.
   const ice = floatingIce({
     count: 7,
     size: 0.031,
     surfaceY: FILL_Y,
     spreadRadius: 0.07,
     seed: 121,
+    submerge: [0.66, 0.8], // big lumps ride LOW — the less white crown shows
+    // through the streaky ribbed glass, the less foam-puff the cluster reads
+    liquidTint: 0xb63812, // a step lighter than the near-maroon cap: the
+    liquidDeep: 0x84230a, // waterline must read as the DRINK's color
   })
 
   // ---- steel lid: shallow dome + knob ------------------------------------
   // satinSteel, NOT lib steel(): the dome faces the sun, and the lib recipe's
   // smoother streaks turned its mirror lobe into a bloom lamp (worst at
-  // night). Roughness floored at 0.36 + env pulled to 0.62 keeps the metal
-  // read without ever crossing the bloom threshold.
+  // night). [0.36, 0.62] @ env 0.62 still left a soft halo spilling onto the
+  // sand at golden hour (sun specular, not env, crossing 1.0): floor 0.44 +
+  // env 0.5 kills the last of it — anisotropic streaks + metalness 1 carry
+  // the steel read, not the mirror lobe.
   const steelMat = satinSteel({
     anisotropy: 0.4,
     seed: 9,
     color: 0xaab0b8,
-    roughnessRange: [0.36, 0.62],
-    envMapIntensity: 0.62,
+    roughnessRange: [0.44, 0.68],
+    envMapIntensity: 0.5,
   })
   const lidProfile: ProfilePoint[] = [
     [0.079, 0.3125], // under-edge
@@ -276,42 +334,102 @@ export function buildDispenser(): DrinkVisual {
   lid.castShadow = true
   lid.receiveShadow = true
 
-  // ---- spigot: flange, valve body, down-turned nozzle, lever --------------
-  // Low on the jar (just above the slab floor) and on a rib crest at +Z.
-  const SPIG_Y = 0.07
+  // ---- spigot: gasket, bell flange, hex collar, valve, spout, lever -------
+  // Low on the jar and on a rib crest at +Z. Built at 1:1 then scaled — at 1×
+  // the tap vanished at trio distance and the boss read as a candy jar.
+  //
+  // REBUILT after the close-up critique (flat matte bone-white disc + slab
+  // lever + hard-clipped cone = paper-craft): the finish bar is tier 10's keg
+  // tap, so this follows the same captured-verified grammar — mid-rough
+  // polishedMetal (satinSteel's 0.44+ roughness floor is right for the big
+  // sun-facing lid but renders small hardware as matte bone), a rubber gasket
+  // seating the metal on the glass, facet value-steps from a hex collar, a
+  // down-turned spout with a rolled lip + dark bore, and a near-vertical
+  // lever with a lacquered ball — the red accent is what survives at trio
+  // distance, where bare-metal detail degrades to a gray blob.
+  const SPIG_SCALE = 1.35
+  const SPIG_Y = 0.085 // nozzle tip stays a clear 10 mm above the skirt lip —
+  // at 0.082 the old clipped cone visually crowded the stand's wooden skirt
   const spigotWallR = innerRadiusAt(outer, SPIG_Y) + ribAmpAt(SPIG_Y, RIB_AMP)
   const spigot = new THREE.Group()
-  // darker gunmetal than the lid: chrome-white vanishes against the bright
-  // liquid; the tap must read as hardware at a glance
-  const spigotMat = steelMat.clone()
-  spigotMat.color.setHex(0x848b93)
-  const addSteel = (geo: THREE.BufferGeometry, x: number, y: number, z: number): void => {
-    const m = new THREE.Mesh(geo, spigotMat)
+  const nickel = polishedMetal({ color: 0x99a1aa, roughness: 0.26, envMapIntensity: 1.0 })
+  const gunmetal = polishedMetal({ color: 0x5f666f, roughness: 0.3, envMapIntensity: 0.9 })
+  const gasketMat = new THREE.MeshPhysicalMaterial({ color: 0x4a423a, roughness: 0.6 })
+  const boreMat = new THREE.MeshPhysicalMaterial({ color: 0x241811, roughness: 0.6 })
+  const knobMat = new THREE.MeshPhysicalMaterial({
+    color: 0xb32530,
+    roughness: 0.25,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.15,
+  })
+  const addPart = (
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    x: number,
+    y: number,
+    z: number
+  ): THREE.Mesh => {
+    const m = new THREE.Mesh(geo, mat)
     m.position.set(x, y, z)
     m.castShadow = true
     m.receiveShadow = true
     spigot.add(m)
+    return m
   }
-  const flangeGeo = new THREE.CylinderGeometry(0.016, 0.0175, 0.005, 28)
-  flangeGeo.rotateX(Math.PI / 2)
-  addSteel(flangeGeo, 0, 0, 0.002)
-  const bodyGeo = new THREE.CylinderGeometry(0.0098, 0.0106, 0.0115, 24)
-  bodyGeo.rotateX(Math.PI / 2)
-  addSteel(bodyGeo, 0, 0, 0.0088)
-  const nozzleGeo = new THREE.CylinderGeometry(0.0072, 0.0055, 0.016, 20)
-  addSteel(nozzleGeo, 0, -0.0115, 0.0118)
-  const pinGeo = new THREE.CylinderGeometry(0.0032, 0.0032, 0.01, 12)
-  addSteel(pinGeo, 0, 0.011, 0.0088)
-  const paddleGeo = new RoundedBoxGeometry(0.0125, 0.0042, 0.026, 2, 0.0016)
-  const paddle = new THREE.Mesh(paddleGeo, spigotMat)
-  paddle.position.set(0, 0.0165, 0.011)
-  paddle.rotation.x = -0.12 // slight tilt, reads as a lever not a slab
-  paddle.castShadow = true
-  paddle.receiveShadow = true
-  spigot.add(paddle)
-  // seat the flange into the rib crest so the tap hugs the wall; keeps the
-  // nozzle tip within ~3 mm of the physics footprint (soft visual overlap)
-  spigot.position.set(0, SPIG_Y, spigotWallR - 0.003)
+  const zAxis = (g: THREE.CylinderGeometry): THREE.CylinderGeometry => {
+    g.rotateX(Math.PI / 2)
+    return g
+  }
+  // fat rubber gasket half-buried against the crest: the metal is PRESSED on
+  // the glass, not butted (the tier-10 "tap floats" lesson)
+  addPart(new THREE.TorusGeometry(0.0128, 0.0028, 10, 32), gasketMat, 0, 0, 0.0008)
+  // bell flange: a small lathe, NOT a flat disc — the rim rolls back toward
+  // the glass and necks smoothly into the valve barrel
+  const bellProfile: ProfilePoint[] = [
+    [0.0155, 0.0002],
+    [0.0152, 0.0014],
+    [0.0136, 0.0034],
+    [0.0111, 0.0048],
+    [0.009, 0.0055],
+    [0.0077, 0.006],
+  ]
+  const bellGeo = latheFromProfile(bellProfile, 36, { samples: 16 })
+  bellGeo.rotateX(Math.PI / 2)
+  addPart(bellGeo, nickel, 0, 0, 0)
+  // hex collar: per-facet value steps are the "machined" read
+  const nut = addPart(hexNutGeometry(0.0102, 0.0066), gunmetal, 0, 0, 0.0086)
+  nut.rotation.z = 0.4 // clock a facet edge into the key light
+  addPart(zAxis(new THREE.CylinderGeometry(0.0067, 0.0073, 0.0095, 32)), nickel, 0, 0, 0.0142)
+  addPart(zAxis(new THREE.CylinderGeometry(0.0085, 0.0085, 0.0042, 32)), gunmetal, 0, 0, 0.0194)
+  addPart(new THREE.SphereGeometry(0.0071, 22, 16), nickel, 0, 0, 0.0206) // valve body
+  // down-turned spout: taper + ROLLED LIP + dark bore (the old cone just
+  // stopped in a hard clipped face)
+  addPart(new THREE.CylinderGeometry(0.0053, 0.0044, 0.0125, 28), nickel, 0, -0.0105, 0.0206)
+  const lip = addPart(new THREE.TorusGeometry(0.0042, 0.0013, 8, 24), nickel, 0, -0.0166, 0.0206)
+  lip.rotation.x = Math.PI / 2
+  const bore = addPart(new THREE.CircleGeometry(0.0034, 16), boreMat, 0, -0.017, 0.0206)
+  bore.rotation.x = Math.PI / 2 // face world-down
+  // lever: tapered stem leaning out over the spout, lacquered ball on top
+  const LEVER_TILT = 0.35
+  const leverDir = new THREE.Vector3(0, Math.cos(LEVER_TILT), Math.sin(LEVER_TILT))
+  const pivot = new THREE.Vector3(0, 0.004, 0.0206)
+  const lever = addPart(
+    new THREE.CylinderGeometry(0.0022, 0.0028, 0.019, 14),
+    nickel,
+    0,
+    0,
+    0
+  )
+  lever.position.copy(pivot).addScaledVector(leverDir, 0.0095)
+  lever.rotation.x = LEVER_TILT
+  const knob = addPart(new THREE.SphereGeometry(0.0057, 18, 14), knobMat, 0, 0, 0)
+  knob.position.copy(pivot).addScaledVector(leverDir, 0.021)
+  // seat the assembly at crest − 5 mm (ribs are narrow ridges; the gasket
+  // fills the ring where the bell rim stands off the groove glass). The spout
+  // overhangs the footprint ~20 mm toward the camera — same soft visual
+  // overlap license as the pineapple crown.
+  spigot.scale.setScalar(SPIG_SCALE)
+  spigot.position.set(0, SPIG_Y, spigotWallR - 0.005)
 
   // template order mirrors the highball reference: opaque + liquid first,
   // transmissive glass last
@@ -320,8 +438,8 @@ export function buildDispenser(): DrinkVisual {
 
   // -- local helpers --------------------------------------------------------
   function ribAmpAt(y: number, amp: number): number {
-    // matches applyRadialRibs' envelope (feather 0.014 from y0 = 0.064)
-    const t = (y - 0.064) / 0.014
+    // matches applyRadialRibs' envelope (feather 0.014 from RIB_Y[0])
+    const t = (y - RIB_Y[0]) / 0.014
     const s = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t)
     return amp * s // +Z sits on a crest (cos(24·π/2) = cos 12π = 1)
   }

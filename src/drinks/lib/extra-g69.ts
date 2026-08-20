@@ -3,6 +3,8 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { Rng } from '../../core/rng'
 import { makeCanvasTexture } from './canvas'
 import { normalMapFromHeight, noiseCanvas } from './noise'
+import { glass } from './materials'
+import { lastLiquidTint } from './liquid'
 
 /**
  * Shared helpers for tier group g69 (6 mason jar, 9 pitcher). New file —
@@ -176,6 +178,60 @@ export function tubeHandle(opts: TubeHandleOpts): THREE.Mesh {
   return mesh
 }
 
+// ------------------------------------------------------------- crisp glass --
+
+export interface CrispGlassOpts {
+  /** REAL wall thickness in metres (kept for the recipe's refraction depth) */
+  wallThickness: number
+  envMapIntensity?: number
+  /** condensation droplet normal map — layered on the CLEARCOAT, see below */
+  condensationNormalMap?: THREE.Texture
+  /** clearcoat normal strength, default 0.6 */
+  normalScale?: number
+  /** clearcoat gloss, default 0.06 */
+  clearcoatRoughness?: number
+  /** clearcoat strength, default 0.55 — A/B verified on the pitcher: at 1.0
+   * the coat mirrors the env's bright sky patch as a big soft white smear
+   * across the liquid (the "milky salmon" defect was mostly this reflection,
+   * not the liquid color); 0.5–0.6 keeps the fresnel rim + sun glint that
+   * sell the glass while the body behind stays readable */
+  clearcoat?: number
+}
+
+/**
+ * Transmissive glass that stays CRISP at game distance. A/B verified on the
+ * pitcher probe: the transmission sample's mip LOD is
+ * log2(bufferSize) · roughness · clamp(ior·2−2, 0, 1), and the shader FLOORS
+ * roughness at 0.0525 — so even `roughness: 0` leaves everything behind the
+ * wall a smear (LOD ≈ 0.5+ of an already 0.6×-res buffer). Setting ior = 1
+ * zeroes the ior term instead: LOD 0 always, straight-through refraction, and
+ * the only remaining softness is the 0.6× buffer upscale.
+ *
+ * ior 1 also collapses the base layer's F0 to 0 (no speculars), so a
+ * clearcoat (fixed internal ior 1.5) takes over the glass read: fresnel rim
+ * light, env streak, sun glint. Condensation droplets go on the CLEARCOAT
+ * normal slot — they catch the key light in the coat WITHOUT perturbing the
+ * view through the wall (the base refraction at ior 1 ignores normals).
+ * Never pass a roughnessMap here: with F0 = 0 it does nothing but reinstate
+ * the fog.
+ */
+export function crispGlass(opts: CrispGlassOpts): THREE.MeshPhysicalMaterial {
+  const mat = glass({
+    wallThickness: opts.wallThickness,
+    roughness: 0,
+    envMapIntensity: opts.envMapIntensity ?? 1.5,
+  })
+  mat.ior = 1.0
+  mat.clearcoat = opts.clearcoat ?? 0.55
+  mat.clearcoatRoughness = opts.clearcoatRoughness ?? 0.06
+  if (opts.condensationNormalMap) {
+    mat.clearcoatNormalMap = opts.condensationNormalMap
+    const s = opts.normalScale ?? 0.6
+    mat.clearcoatNormalScale.set(s, s)
+  }
+  return mat
+}
+
 // ------------------------------------------------------------- solid glass --
 
 export interface SolidGlassOpts {
@@ -183,6 +239,9 @@ export interface SolidGlassOpts {
   thickness: number
   tint?: THREE.ColorRepresentation
   roughness?: number
+  /** env response, default 1.8 — drop toward 1.0 when the rod reads frosted
+   * bone-white instead of glass (bright body + hot env = white plastic) */
+  envMapIntensity?: number
 }
 
 /**
@@ -203,7 +262,7 @@ export function solidGlass(opts: SolidGlassOpts): THREE.MeshPhysicalMaterial {
     specularIntensity: 1,
     clearcoat: 1.0,
     clearcoatRoughness: 0.08,
-    envMapIntensity: 1.8, // edge highlights are what sell the rod
+    envMapIntensity: opts.envMapIntensity ?? 1.8, // edge highlights sell the rod
     side: THREE.FrontSide,
   })
 }
@@ -322,19 +381,21 @@ export function lumpyIceGeometry(size: number, seed = 1, amp = 0.05): THREE.Buff
 
 export interface WetIceOpts {
   seed?: number
-  /** body roughness range painted into the noise map, default [0.14, 0.42] */
+  /** body roughness range painted into the noise map, default [0.07, 0.3] */
   roughnessRange?: readonly [number, number]
 }
 
 /**
  * Wet floating ice — OPAQUE-pass on purpose (ice behind a transmissive glass
  * wall must stay in the opaque pass; see materials.ts gotcha). The ice read
- * comes from: cold blue-white body, swirly internal roughness variation
- * (frozen inclusions), and a hard wet clearcoat with hot env glints — NOT
- * from the matte chalk-white that reads marshmallow.
+ * comes from: cool BLUE-GRAY body (matched to the tier-11 bucket heap, the
+ * roster's reference ice — pure white + matte is the marshmallow), a cool
+ * mottled map (darker internal patches = seeing INTO the cube), semi-gloss
+ * facets, and a hard wet clearcoat. envMapIntensity stays ≤ 1.2: the old 1.6
+ * blew sun-facing facets past the 1.0 bloom threshold into chalk-white puffs.
  */
 export function wetIce(opts: WetIceOpts = {}): THREE.MeshPhysicalMaterial {
-  const range = opts.roughnessRange ?? ([0.14, 0.42] as const)
+  const range = opts.roughnessRange ?? ([0.07, 0.3] as const)
   const swirl = noiseCanvas(128, 128, 3, opts.seed ?? 19, {
     cellsX: 5,
     cellsY: 5,
@@ -343,16 +404,50 @@ export function wetIce(opts: WetIceOpts = {}): THREE.MeshPhysicalMaterial {
   const roughnessMap = new THREE.CanvasTexture(swirl)
   roughnessMap.colorSpace = THREE.NoColorSpace
   roughnessMap.wrapS = roughnessMap.wrapT = THREE.RepeatWrapping
+  // internal-depth mottle: blue-gray patches over a cool base — the cheap
+  // stand-in for subsurface light; keyed cooler than the sky so AgX + the warm
+  // key can't launder it back to white
+  const rng = new Rng((opts.seed ?? 19) + 3)
+  const map = makeCanvasTexture(128, 128, (ctx, w, h) => {
+    ctx.fillStyle = '#d4e2ec'
+    ctx.fillRect(0, 0, w, h)
+    for (let i = 0; i < 9; i++) {
+      const x = rng.next() * w
+      const y = rng.next() * h
+      const r = rng.range(0.15, 0.32) * w
+      const g = ctx.createRadialGradient(x, y, r * 0.1, x, y, r)
+      g.addColorStop(0, 'rgba(136,160,180,0.3)')
+      g.addColorStop(1, 'rgba(136,160,180,0)')
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    // fracture glints: short bright hairlines
+    ctx.strokeStyle = 'rgba(244,251,255,0.75)'
+    ctx.lineWidth = 1.3
+    for (let i = 0; i < 8; i++) {
+      const x = rng.next() * w
+      const y = rng.next() * h
+      const a = rng.range(0, Math.PI)
+      const l = rng.range(0.08, 0.24) * w
+      ctx.beginPath()
+      ctx.moveTo(x - Math.cos(a) * l, y - Math.sin(a) * l)
+      ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l)
+      ctx.stroke()
+    }
+  })
   return new THREE.MeshPhysicalMaterial({
-    color: 0xe8f4fb,
+    color: 0xffffff, // tint lives in the map (× vertex waterline tint)
+    map,
     metalness: 0,
     roughness: 1, // absolute values live in the map
     roughnessMap,
     ior: 1.31,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.06,
+    clearcoatRoughness: 0.05,
     specularIntensity: 1,
-    envMapIntensity: 1.6,
+    envMapIntensity: 1.15,
   })
 }
 
@@ -369,35 +464,85 @@ export interface FloatingIceOpts {
   freeboard?: number
   seed?: number
   material?: THREE.Material
+  /** liquid surface color — bakes a wet meniscus band into vertex colors
+   * just above the waterline, so the lump visibly sits IN the liquid instead
+   * of ON it (the placed-marshmallow defect). Pass the tier's liquid surface
+   * tone, slightly darkened. Default: the surface tone of the most recent
+   * buildLiquid() call × 0.72 (builders create the liquid before its ice),
+   * so untinted call sites still get the waterline read. */
+  waterline?: THREE.ColorRepresentation
 }
+
+const smoothT = (t: number): number => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
 
 /**
  * Buoyancy-honest ice: cubes ride ~80% SUBMERGED — the opaque liquid volume
  * hides everything under the cap plane, so only a low lump breaks the
  * surface, exactly like real floating ice (cubes sitting proud ON the liquid
- * read as marshmallows). One shared lumpy geometry + one wet material;
- * variance is per-mesh scale/rotation. Tilts stay small: floating ice levels
- * itself flat-side-up.
+ * read as marshmallows). One shared lumpy geometry + one wet material; per
+ * mesh: scale/rotation variance and — when `waterline` is given — a baked
+ * vertex-color band that tints the lump toward the liquid right at the
+ * surface (the wet climb real ice shows). Tilts moderate: floating ice
+ * levels itself, but a cocked edge breaking the surface is what kills the
+ * flat-tile read from the game's top-down camera.
  */
 export function floatingIce(opts: FloatingIceOpts): THREE.Group {
   const rng = new Rng(opts.seed ?? 42)
   const size = opts.size
   const freeboard = opts.freeboard ?? 0.22
-  const geo = lumpyIceGeometry(size, (opts.seed ?? 42) + 7)
+  const geo = lumpyIceGeometry(size, (opts.seed ?? 42) + 7, 0.032)
   const mat = opts.material ?? wetIce({ seed: (opts.seed ?? 42) + 13 })
+  // No explicit waterline → fall back to the drink the tier just built
+  // (surface tone, darkened like the pitcher's hand-tuned value): builders
+  // create the liquid BEFORE its ice, so the registry holds the right color.
+  const waterline: THREE.ColorRepresentation | undefined =
+    opts.waterline ?? lastLiquidTint()?.surface.multiplyScalar(0.72)
+  if (waterline !== undefined && mat instanceof THREE.Material) {
+    mat.vertexColors = true
+  }
+  const tint = new THREE.Color(waterline ?? 0xffffff)
+  const white = new THREE.Color(0xffffff)
+  const scratch = new THREE.Vector3()
+  const euler = new THREE.Euler()
   const group = new THREE.Group()
   for (let i = 0; i < opts.count; i++) {
-    const mesh = new THREE.Mesh(geo, mat)
     const a = (i / opts.count) * Math.PI * 2 + rng.range(-0.5, 0.5)
     const rad = opts.spreadRadius * Math.sqrt(rng.range(0.15, 1))
-    const fb = freeboard * rng.range(0.75, 1.25)
-    mesh.position.set(
-      Math.cos(a) * rad,
-      opts.fillY - size * (0.5 - fb),
-      Math.sin(a) * rad
-    )
-    mesh.rotation.set(rng.range(-0.22, 0.22), rng.range(0, Math.PI * 2), rng.range(-0.22, 0.22))
-    mesh.scale.set(rng.range(0.85, 1.12), rng.range(0.82, 1.0), rng.range(0.85, 1.12))
+    const fb = freeboard * rng.range(0.6, 1.45)
+    const px = Math.cos(a) * rad
+    const py = opts.fillY - size * (0.5 - fb)
+    const pz = Math.sin(a) * rad
+    euler.set(rng.range(-0.34, 0.34), rng.range(0, Math.PI * 2), rng.range(-0.34, 0.34))
+    const sx = rng.range(0.85, 1.12)
+    const sy = rng.range(0.82, 1.0)
+    const sz = rng.range(0.85, 1.12)
+
+    let meshGeo: THREE.BufferGeometry = geo
+    if (waterline !== undefined) {
+      // bake the wet band per mesh in GROUP space: full liquid tint at the
+      // waterline (hidden below it by the cap anyway), fading to clean ice
+      // over ~0.35 of the cube edge above it
+      meshGeo = geo.clone()
+      const pos = meshGeo.attributes.position as THREE.BufferAttribute
+      const colors = new Float32Array(pos.count * 3)
+      const band = size * 0.35
+      for (let vi = 0; vi < pos.count; vi++) {
+        scratch.set(pos.getX(vi) * sx, pos.getY(vi) * sy, pos.getZ(vi) * sz)
+        scratch.applyEuler(euler)
+        const y = scratch.y + py
+        const t = smoothT((opts.fillY + band - y) / band) * 0.8
+        const c = white.clone().lerp(tint, t)
+        colors[vi * 3] = c.r
+        colors[vi * 3 + 1] = c.g
+        colors[vi * 3 + 2] = c.b
+      }
+      meshGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    }
+
+    const mesh = new THREE.Mesh(meshGeo, mat)
+    mesh.position.set(px, py, pz)
+    mesh.rotation.copy(euler)
+    mesh.scale.set(sx, sy, sz)
     mesh.castShadow = true
     mesh.receiveShadow = true
     group.add(mesh)
@@ -425,6 +570,109 @@ export function liquidDepthGradient(stops: readonly DepthGradientStop[]): THREE.
     for (const s of stops) g.addColorStop(Math.min(1, Math.max(0, s.v)), s.color)
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
+  })
+}
+
+// ----------------------------------------------- submerged garnish ghosts --
+
+export interface SubmergedWheelGhost {
+  /** texture u of the wheel centre = lathe azimuth (atan2(x,z), wrapped to
+   * 0..2π) / 2π — LatheGeometry puts u 0 at +Z and runs toward +X first */
+  u: number
+  /** v of the wheel centre in normalized volume height (see buildLiquid) */
+  v: number
+  /** wheel radius in u units (wheelRadius / wallRadius / 2π) */
+  ru: number
+  /** wheel radius in v units (wheelRadius / volumeHeightSpan) */
+  rv: number
+}
+
+export interface LiquidBodyTextureOpts {
+  /** vertical depth ramp — v0 floor (dark) → v1 surface (bright). Author
+   * 10–20% hotter than target: AgX desaturates. */
+  stops: readonly DepthGradientStop[]
+  /** fill line in v — ghosts are only painted below it (above it the wall is
+   * clipped away at runtime anyway) and the depth veil is keyed from it */
+  vFill: number
+  /** citrus wheels pressed against the inside wall, seen THROUGH the liquid */
+  wheels?: readonly SubmergedWheelGhost[]
+  /** liquid veil color laid over the ghosts, deepening away from the surface */
+  veil?: string
+  rind?: string
+  pith?: string
+  pulp?: string
+  width?: number
+  height?: number
+}
+
+/**
+ * Body texture for an opaque-pass liquid: the depth ramp PLUS painted
+ * "submerged garnish" ghosts. Real translucent tea shows a lemon wheel
+ * pressed against the wall through centimetres of liquid — with transmission
+ * off that read must be painted: a soft-edged two-tone citrus disc at the
+ * wheel's azimuth, dimming and losing contrast with depth under a veil of
+ * the liquid color. Align each ghost with the real wheel mesh poking above
+ * the fill line and the pair reads as ONE wheel crossing the surface.
+ */
+export function liquidBodyTexture(opts: LiquidBodyTextureOpts): THREE.CanvasTexture {
+  const W = opts.width ?? 512
+  const H = opts.height ?? 512
+  const veil = opts.veil ?? '#8a3305'
+  const rind = opts.rind ?? '#e9c95e'
+  const pith = opts.pith ?? '#f2e5b4'
+  const pulp = opts.pulp ?? '#dfba4c'
+  return makeCanvasTexture(W, H, (ctx, w, h) => {
+    const vToY = (v: number): number => (1 - v) * h // canvas top = v1
+    const g = ctx.createLinearGradient(0, h, 0, 0)
+    for (const s of opts.stops) g.addColorStop(Math.min(1, Math.max(0, s.v)), s.color)
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, w, h)
+
+    for (const wheel of opts.wheels ?? []) {
+      const cx = wheel.u * w
+      const cy = vToY(wheel.v)
+      const rx = wheel.ru * w
+      const ry = wheel.rv * h
+      ctx.save()
+      // soft edges: the wheel is behind liquid, never crisp
+      ctx.filter = `blur(${Math.max(2, w * 0.006)}px)`
+      const ell = (fr: number, fill: string): void => {
+        ctx.fillStyle = fill
+        ctx.beginPath()
+        ctx.ellipse(cx, cy, rx * fr, ry * fr, 0, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      ell(1, rind)
+      ell(0.86, pith)
+      ell(0.78, pulp)
+      // wedge membranes: faint spokes
+      ctx.strokeStyle = pith
+      ctx.globalAlpha = 0.55
+      ctx.lineWidth = Math.max(1.5, w * 0.006)
+      for (let s = 0; s < 8; s++) {
+        const a = (s / 8) * Math.PI * 2 + 0.35
+        ctx.beginPath()
+        ctx.moveTo(cx + Math.cos(a) * rx * 0.12, cy + Math.sin(a) * ry * 0.12)
+        ctx.lineTo(cx + Math.cos(a) * rx * 0.74, cy + Math.sin(a) * ry * 0.74)
+        ctx.stroke()
+      }
+      ctx.globalAlpha = 1
+      ctx.filter = 'none'
+      // depth veil: liquid swallows the ghost as it goes down — light haze at
+      // the fill line, nearly opaque at the wheel's bottom edge
+      const vg = ctx.createLinearGradient(0, vToY(opts.vFill), 0, cy + ry)
+      const veilC = new THREE.Color(veil)
+      const rgba = (a: number): string =>
+        `rgba(${Math.round(veilC.r * 255)},${Math.round(veilC.g * 255)},${Math.round(veilC.b * 255)},${a})`
+      vg.addColorStop(0, rgba(0.1))
+      vg.addColorStop(0.5, rgba(0.38))
+      vg.addColorStop(1, rgba(0.75))
+      ctx.fillStyle = vg
+      ctx.beginPath()
+      ctx.ellipse(cx, cy, rx * 1.04, ry * 1.04, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
   })
 }
 

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { Rng } from '../../core/rng'
 import { makeCanvasTexture } from './canvas'
+import { lastLiquidTint } from './liquid'
 
 /**
  * Reusable garnish/hardware parts. Each factory returns a Mesh/Group with
@@ -93,6 +94,12 @@ export interface IceMaterialOpts {
   transmissive?: boolean
   /** cube edge, used as transmission thickness (m) */
   size?: number
+  /**
+   * Opaque branch only: multiply baked vertex colors (the waterline tint from
+   * bakeWaterlineTint) into the shade. Only enable when every mesh wearing
+   * this material HAS a color attribute — a missing attribute renders black.
+   */
+  vertexColors?: boolean
 }
 
 export function iceMaterial(opts: IceMaterialOpts = {}): THREE.MeshPhysicalMaterial {
@@ -110,19 +117,115 @@ export function iceMaterial(opts: IceMaterialOpts = {}): THREE.MeshPhysicalMater
       clearcoatRoughness: 0.2,
     })
   }
-  // frosted: bright, blue-shadowed, glassy clearcoat — stays visible through
-  // glass walls. Gloss + flat-ish facets are what make it read as ice, not
-  // marshmallow.
+  // Translucent-LOOKING while staying fully opaque-pass. transparent:true was
+  // A/B tested and is a trap: alpha-blended meshes are absent from the
+  // transmission buffer AND depth-occluded by the glass wall, so the ice
+  // simply vanishes at game camera angles. The translucency is faked instead:
+  // a mottled cool map (deep blue-gray internal patches = seeing INTO the
+  // cube, bright fracture hairlines = internal cracks) under a wet sharp
+  // clearcoat, low roughness so facets catch hard glints. Blue-white, never
+  // pure white — pure white + matte is the marshmallow.
+  const seed = 1337
+  const map = makeCanvasTexture(128, 128, (ctx, w, h) => {
+    const rng = new Rng(seed)
+    // Cool blue-white base, authored deeper than looks right raw: the warm
+    // key + AgX pull it back toward white, and the transmission-buffer blur
+    // (in-glass ice is always seen THROUGH the wall) averages fine detail
+    // away — only value/color structure survives. The old #eaf3f9 base with
+    // 0.24-alpha patches rendered as flat chalk (crit2-t5-zoom).
+    ctx.fillStyle = '#e0ecf6'
+    ctx.fillRect(0, 0, w, h)
+    // internal depth: darker blue-gray patches = seeing INTO the cube
+    for (let i = 0; i < 9; i++) {
+      const x = rng.next() * w
+      const y = rng.next() * h
+      const r = rng.range(0.14, 0.32) * w
+      const g = ctx.createRadialGradient(x, y, r * 0.12, x, y, r)
+      g.addColorStop(0, 'rgba(138,168,193,0.42)')
+      g.addColorStop(1, 'rgba(138,168,193,0)')
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    // fracture glints: short bright hairlines
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+    ctx.lineWidth = 1.4
+    for (let i = 0; i < 10; i++) {
+      const x = rng.next() * w
+      const y = rng.next() * h
+      const a = rng.range(0, Math.PI)
+      const l = rng.range(0.08, 0.26) * w
+      ctx.beginPath()
+      ctx.moveTo(x - Math.cos(a) * l, y - Math.sin(a) * l)
+      ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l)
+      ctx.stroke()
+    }
+  })
   return new THREE.MeshPhysicalMaterial({
-    color: 0xe9f3fa,
+    color: 0xffffff, // the tint lives in the map
+    map,
     metalness: 0,
-    roughness: 0.19,
+    roughness: 0.15,
     ior: 1.31,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.1,
+    clearcoatRoughness: 0.05,
     specularIntensity: 1,
-    envMapIntensity: 1.45,
+    // 1.6 mirrored the golden-hour SKY on the dome tops — at game distance
+    // the cubes read as blue candy; 1.2 keeps the glint, drops the sky wash
+    envMapIntensity: 1.2,
+    vertexColors: opts.vertexColors ?? false,
   })
+}
+
+// ------------------------------------------------------ waterline tinting ---
+
+export interface WaterlineTintOpts {
+  /** GEOMETRY-space y of the waterline plane through the lump */
+  waterlineY: number
+  /** lump edge (m) — scales the blend band */
+  size: number
+  /** liquid color at/below the waterline (the drink's body color) */
+  tint: THREE.ColorRepresentation
+  /** blend band above the waterline as a fraction of size, default 0.45 */
+  band?: number
+  /** tint strength at the waterline 0..1, default 0.9 */
+  strength?: number
+}
+
+/**
+ * Bakes the "floating IN the drink" read into ice geometry as vertex colors:
+ * at/below the waterline the lump carries the liquid color (wet ice is a
+ * lightpipe — its base reads as the drink shining through), fading to clean
+ * cold blue-white above. This is the piece a mottled map cannot deliver
+ * through the transmission-buffer blur: a bold value/color gradient anchored
+ * to the surface survives the smear where texture detail does not, and it is
+ * what visually interlocks the lump with the liquid instead of leaving a
+ * white marshmallow perched ON an orange disc. Works on SHARED geometry:
+ * every cube of a batch floats at (nearly) the same geometry-space waterline
+ * and the blend band swallows the per-mesh submerge jitter.
+ *
+ * Vertex colors multiply map × color, so the paired material needs
+ * `vertexColors: true` and a near-white base.
+ */
+export function bakeWaterlineTint(geo: THREE.BufferGeometry, opts: WaterlineTintOpts): void {
+  const band = (opts.band ?? 0.45) * opts.size
+  const strength = opts.strength ?? 0.9
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const colors = new Float32Array(pos.count * 3)
+  const white = new THREE.Color(1, 1, 1)
+  // thin ice lightens + slightly milks what shows through it
+  const wet = new THREE.Color(opts.tint).lerp(white, 0.15)
+  const c = new THREE.Color()
+  for (let i = 0; i < pos.count; i++) {
+    const hRel = (pos.getY(i) - opts.waterlineY) / band
+    const s = hRel <= 0 ? 0 : hRel >= 1 ? 1 : hRel * hRel * (3 - 2 * hRel)
+    c.copy(white).lerp(wet, (1 - s) * strength)
+    colors[i * 3] = c.r
+    colors[i * 3 + 1] = c.g
+    colors[i * 3 + 2] = c.b
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 }
 
 /** shared rounded-cube geometry for a batch of ice — flat faces, soft edges */
@@ -141,29 +244,53 @@ export interface ScatterIceOpts {
   seed?: number
   material?: THREE.Material
   geometry?: THREE.BufferGeometry
+  /** submerged fraction range of the cube edge, default [0.6, 0.78] */
+  submerge?: readonly [number, number]
+  /**
+   * liquid color the cube bases pick up at the waterline. Default: the body
+   * color of the most recent buildLiquid() call (tiers build the liquid
+   * before its ice), else a neutral wet gray-blue.
+   */
+  liquidTint?: THREE.ColorRepresentation
 }
 
 /**
  * Floating ice: cubes share ONE geometry + ONE material; variance comes from
- * per-mesh scale (0.85–1.15, slightly squashed) and rotation. Centres sit a
- * little under surfaceY so corners break the surface, tilted like real ice.
+ * per-mesh scale (0.85–1.15, slightly squashed) and rotation. Buoyancy-honest:
+ * centres sit WELL under surfaceY so each cube rides ~60–78% submerged — the
+ * opaque liquid body swallows the underwater part and only a low tilted dome
+ * breaks the surface (cubes perched ON the fill plane read as marshmallows).
+ * Tilts stay small: floating ice levels itself. The waterline read itself is
+ * baked vertex color (bakeWaterlineTint): base of each visible lump carries
+ * the liquid tint, fading to blue-white — without it the cubes read as white
+ * puffs sitting ON the surface no matter how deep they actually sit.
  */
 export function scatterIce(opts: ScatterIceOpts): THREE.Group {
   const rng = new Rng(opts.seed ?? 42)
   const size = opts.size ?? 0.02
   const geo = opts.geometry ?? iceCubeGeometry(size)
-  const mat = opts.material ?? iceMaterial({ size })
+  const [sub0, sub1] = opts.submerge ?? [0.6, 0.78]
+  // waterline in geometry space: mean submerge, un-scaled by the mean scaleY
+  const meanScaleY = 0.925
+  const tint = opts.liquidTint ?? lastLiquidTint()?.body ?? 0xb9c7d2
+  bakeWaterlineTint(geo, {
+    waterlineY: (size * ((sub0 + sub1) / 2 - 0.5)) / meanScaleY,
+    size,
+    tint,
+  })
+  const mat = opts.material ?? iceMaterial({ size, vertexColors: true })
   const group = new THREE.Group()
   for (let i = 0; i < opts.count; i++) {
     const mesh = new THREE.Mesh(geo, mat)
     const a = (i / opts.count) * Math.PI * 2 + rng.range(-0.5, 0.5)
     const rad = opts.spreadRadius * Math.sqrt(rng.range(0.15, 1))
+    const submerge = rng.range(sub0, sub1) // fraction of the cube below the fill plane
     mesh.position.set(
       Math.cos(a) * rad,
-      opts.surfaceY - size * rng.range(0.1, 0.3),
+      opts.surfaceY - size * (submerge - 0.5),
       Math.sin(a) * rad
     )
-    mesh.rotation.set(rng.range(-0.4, 0.4), rng.range(0, Math.PI * 2), rng.range(-0.4, 0.4))
+    mesh.rotation.set(rng.range(-0.18, 0.18), rng.range(0, Math.PI * 2), rng.range(-0.18, 0.18))
     mesh.scale.set(rng.range(0.85, 1.15), rng.range(0.8, 1.05), rng.range(0.85, 1.15))
     mesh.castShadow = true
     group.add(mesh)

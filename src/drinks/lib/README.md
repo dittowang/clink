@@ -107,10 +107,19 @@ one set of maps across cold tiers rather than one per tier if VRAM matters).
 `bentStraw({ bottom, bendStart, tip, radius?, color?, stripe? })` — tube
 along a CatmullRom path with the classic tight elbow; `stripe` paints candy
 stripes. Keep the tip inside the tier's footprint radius.
-`iceCubeGeometry(size)` + `iceMaterial({ transmissive? })` + `scatterIce({
-count, surfaceY, spreadRadius, seed })` — cubes share ONE geometry and ONE
-material; variance is per-mesh scale/rotation. Centres sit just under
-`surfaceY` so tilted corners break the liquid surface.
+`iceCubeGeometry(size)` + `iceMaterial({ transmissive?, vertexColors? })` +
+`scatterIce({ count, surfaceY, spreadRadius, seed, submerge?, liquidTint? })`
+— cubes share ONE geometry and ONE material; variance is per-mesh
+scale/rotation. Centres sit well under `surfaceY` (~60–78% submerged) and
+`bakeWaterlineTint` writes the WATERLINE into vertex colors: liquid tint at
+the base of each visible lump fading to cool blue-white above. That gradient
+is the read — the mottled map alone cannot survive the transmission-buffer
+blur (in-glass ice is always seen through the wall), and untinted cubes
+render as chalk marshmallows perched ON the surface no matter how deep they
+sit (critic-verified, twice). `liquidTint` defaults to the body color of the
+most recent `buildLiquid()` call (see `lastLiquidTint` below); the
+`floatingIce` variants in extra-g69/extra-g512 follow the same defaulting
+rule for their `waterline`/`liquidTint` opts.
 `paperUmbrella({ radius, pleats, colors, stickLength })` — faceted pleated
 canopy + stick, origin at stick bottom. `pullTab()` — extruded stadium shape
 with finger + rivet holes, lying flat, rivet at origin. `handle({ radius,
@@ -125,6 +134,13 @@ spec }`. Builds the liquid volume lathe from the INNER glass profile inset
 them. **The volume wall runs 4 mm ABOVE fillY** and closes on top, so a
 tilted clipping plane always cuts solid wall, never an open edge. Add the
 returned meshes to your template and return `spec` as `DrinkVisual.liquid`.
+
+`lastLiquidTint()` → `{ body, surface } | null` — the colors of the most
+recent `buildLiquid` call. Garnish factories (the ice recipes) use it to
+default their waterline tint: builders are synchronous and always create the
+liquid BEFORE the garnish floating in it, so at garnish-build time the
+registry holds the current drink. Builders without a liquid fall back to a
+neutral wet gray-blue.
 
 ### Clipping plane conventions (game + probe)
 

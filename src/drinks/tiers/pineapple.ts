@@ -91,7 +91,10 @@ function paintSkin(): SkinMaps {
           const dc = Math.hypot(dcx, dcy)
           const eyeR = 0.12 + cellHash(ia, ib, 5) * 0.05
           const eye = 1 - sstep(0.035, eyeR, dc)
-          let hgt = 0.2 + plateN * 0.42 + dome * 0.12 + eye * 0.26
+          // gentle dome (0.18): enough curvature that every plate takes a
+          // light gradient that MOVES with the key as the drink turns, still
+          // well under the fat dome that read as quilted upholstery
+          let hgt = 0.2 + plateN * 0.42 + dome * 0.18 + eye * 0.26
           hgt = 0.4 + (hgt - 0.4) * fade
           const hi = (y * w + x) * 4
           const hg = Math.max(0, Math.min(255, Math.round(hgt * 255)))
@@ -100,25 +103,28 @@ function paintSkin(): SkinMaps {
           hd[hi + 2] = hg
           hd[hi + 3] = 255
 
-          // color: golden ramp + per-cell jitter + dark grooves + eye dot
-          // ramp: deeper amber at the base, gold in the middle, a green
-          // breath at the very top under the crown
+          // color: golden-brown ramp + per-cell jitter + dark grooves + eye
+          // dot. Ramp: deep amber at the base, golden-brown in the middle, a
+          // green breath at the very top under the crown. Authored ~15%
+          // deeper/more saturated than the target render — AgX + the warm
+          // key + the clearcoat wash lifted the old gold ramp to pale
+          // cream-peach (critic), so the pigment goes on darker here.
           let r: number, g2: number, bl: number
           if (v < 0.45) {
             const t = v / 0.45
-            r = 206 + (240 - 206) * t
-            g2 = 118 + (158 - 118) * t
-            bl = 14 + (22 - 14) * t
+            r = 158 + (206 - 158) * t
+            g2 = 88 + (132 - 88) * t
+            bl = 8 + (14 - 8) * t
           } else if (v < 0.88) {
             const t = (v - 0.45) / 0.43
-            r = 240 + (226 - 240) * t
-            g2 = 158 + (150 - 158) * t
-            bl = 22 + (28 - 22) * t
+            r = 206 + (192 - 206) * t
+            g2 = 132 + (124 - 132) * t
+            bl = 14 + (20 - 14) * t
           } else {
             const t = (v - 0.88) / 0.12
-            r = 226 + (170 - 226) * t
-            g2 = 150 + (140 - 150) * t
-            bl = 28 + (38 - 28) * t
+            r = 192 + (146 - 192) * t
+            g2 = 124 + (116 - 124) * t
+            bl = 20 + (30 - 20) * t
           }
           // per-cell tone jitter: brightness ±9%, some cells lean orange,
           // some lean olive
@@ -128,15 +134,16 @@ function paintSkin(): SkinMaps {
           r *= bright
           g2 *= bright
           bl *= bright
-          if (j2 < 0.3) {
-            // orange-leaning cell
-            r *= 1.05
-            g2 *= 0.96
-          } else if (j2 > 0.82) {
+          if (j2 < 0.25) {
+            // orange-leaning cell (kept mild — stronger lean read salmon
+            // under the warm key + specular wash)
+            r *= 1.04
+            g2 *= 0.97
+          } else if (j2 > 0.75) {
             // olive-leaning cell
-            r *= 0.95
-            g2 *= 1.02
-            bl *= 0.88
+            r *= 0.94
+            g2 *= 1.03
+            bl *= 0.85
           }
           // grooves darken hard, eye dot darkens the centre
           const grooveK = 1 - (1 - plate) * 0.55 * fade
@@ -167,10 +174,12 @@ function paintSkin(): SkinMaps {
     { repeat: [1, 1], anisotropy: 8 }
   )
   hctx.putImageData(himg, 0, 0)
+  // 5.0 conversion strength: at 2.6 the groove bevels were too shallow to
+  // re-shade as the barrel turns and the cells read painted-on (critic)
   const normalMap = makeCanvasTexture(
     W,
     H,
-    (ctx) => ctx.drawImage(normalMapFromHeight(height, 2.6), 0, 0),
+    (ctx) => ctx.drawImage(normalMapFromHeight(height, 5.0), 0, 0),
     { srgb: false, repeat: [1, 1] }
   )
   return { map, normalMap }
@@ -376,7 +385,14 @@ export function buildPineapple(): DrinkVisual {
     [TOP_R, BODY_TOP],
   ]
   const bodyGeo = latheFromProfile(prof, 64, { samples: 44 })
-  const bodyMat = waxRind({ map: skin.map, normalMap: skin.normalMap, normalScale: 1.0 })
+  const bodyMat = waxRind({ map: skin.map, normalMap: skin.normalMap, normalScale: 1.5 })
+  // THE relight fix: waxRind's clearcoat (0.9) reflects off the CLEARCOAT
+  // normal, which defaults to the smooth lathe — so the waxy sheen ignored
+  // the cells entirely and laid a uniform wash over the paint (the
+  // "painted-on, no light response" read). Give the coat the same cell
+  // normals and the sheen breaks per-plate and travels as the drink turns.
+  bodyMat.clearcoatNormalMap = skin.normalMap
+  bodyMat.clearcoatNormalScale = new THREE.Vector2(1.5, 1.5)
   const body = new THREE.Mesh(bodyGeo, bodyMat)
   body.castShadow = true
   body.receiveShadow = true

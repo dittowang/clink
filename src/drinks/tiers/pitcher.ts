@@ -1,8 +1,12 @@
 import * as THREE from 'three'
 import type { DrinkVisual } from '../types'
 import { TIERS } from '../../config/tiers'
-import { latheFromProfile, doubleWalledProfile, type ProfilePoint } from '../lib/profiles'
-import { glass } from '../lib/materials'
+import {
+  latheFromProfile,
+  doubleWalledProfile,
+  innerRadiusAt,
+  type ProfilePoint,
+} from '../lib/profiles'
 import { buildLiquid } from '../lib/liquid'
 import { makeCondensation } from '../lib/condensation'
 import {
@@ -11,7 +15,8 @@ import {
   solidGlass,
   pinchSpout,
   floatingIce,
-  liquidDepthGradient,
+  crispGlass,
+  liquidBodyTexture,
 } from '../lib/extra-g69'
 
 /**
@@ -21,11 +26,13 @@ import {
  * grazing-angle glow, 5 mostly-submerged ice lumps, two lemon wheels leaning
  * on the inside wall at the tea line, condensation.
  *
- * Sharpness discipline: everything inside is seen through the transmissive
- * wall, whose transmission buffer runs at 0.6× resolution — roughness
- * multiplies that blur (LOD ∝ roughness). Fog stays ≤ 0.035 on a glass this
- * big or the whole tier smears at game distance; droplet NORMALS carry the
- * cold story instead.
+ * Sharpness discipline (A/B verified on this tier): the transmission mip
+ * LOD is log2(bufferSize) · roughness · clamp(ior·2−2, 0, 1) with a 0.0525
+ * roughness FLOOR baked into the shader — even roughness 0 leaves the whole
+ * interior a smear. crispGlass() zeroes the ior term instead (ior 1) and
+ * hands speculars + condensation droplets to a clearcoat layer, so the only
+ * remaining softness is the 0.6× buffer upscale. Droplet detail lives in the
+ * clearcoat NORMAL map; the base stays fog-free.
  *
  * Spout on -X / handle on +X so BOTH silhouette signatures read in the
  * front-facing lineup + silhouette strip. R = 0.075, H = 0.240.
@@ -68,90 +75,113 @@ export function buildPitcher(): DrinkVisual {
     startY: 0.200,
     topY: H,
     halfAngle: 0.68,
-    outPush: 0.016,
-    lift: -0.0045,
-    pinch: 0.45,
+    outPush: 0.019, // pushed harder than the probe needs: the spout must
+    lift: -0.0055, // survive the 0.6× transmission buffer at trio distance
+    pinch: 0.52,
   })
 
   const condensation = makeCondensation(512, 1024, 9, {
-    baseRoughness: 0.03, // see header — fog on THIS tier is game-distance blur
-    dropletRoughness: 0.02,
-    density: 0.85,
-    normalStrength: 2.2,
+    baseRoughness: 0.03, // roughness map goes UNUSED (see crispGlass) —
+    dropletRoughness: 0.02, // only the droplet normals ride the clearcoat
+    density: 0.3, // a cold hint — 0.6 @ strength 2.2 painted a soft white
+    normalStrength: 1.7, // smear across the whole vessel (crit2-t9)
   })
-  condensation.roughnessMap.repeat.set(2, 1)
   condensation.normalMap.repeat.set(2, 1)
-  const glassMat = glass({
+  const glassMat = crispGlass({
     wallThickness: WALL,
-    roughness: 0.02,
-    envMapIntensity: 1.5,
+    envMapIntensity: 0.9, // 1.5 laid a milky sky-reflection veil over the tea
+    // and pushed rim speculars past the 1.0 bloom threshold — the trio-shot
+    // "fuzzy soft-edged tumbler" was mostly this veil + bloom
+    condensationNormalMap: condensation.normalMap,
+    normalScale: 0.32,
   })
   const glassMesh = new THREE.Mesh(glassGeo, glassMat)
   glassMesh.castShadow = false // transmission-lit; the tea casts instead
   glassMesh.receiveShadow = false
 
-  // ---- iced tea: amber with a depth ramp + warm rim glow ------------------
-  // Opaque-pass (transmission gotcha), so the translucency is FAKED: a
-  // vertical ramp (near-black floor → hot amber at the surface) plays the
-  // attenuation depth, sheen plays the sun bleeding through the grazing
-  // edges. Colors authored hot — AgX pulls them back toward brick.
+  // ---- iced tea: hot amber depth ramp + submerged lemon ghosts ------------
+  // Opaque-pass tea (the transmission gotcha) fakes light transmission with a
+  // PAINTED read: near-black steeped floor → dark amber belly → a hot backlit
+  // glow band right under the surface. The previous ramp topped out too early
+  // (body color from v0.8 up) and the glass's 1.5 env veil washed it to milky
+  // salmon; this ramp keeps the belly dark + saturated and saves the glow for
+  // the last 15%. The two lemon wheels get painted GHOSTS below the fill line
+  // at their exact azimuths — a wheel seen THROUGH the tea — aligning with
+  // the real meshes poking above it.
+  const wheelR = 0.025
+  const wheelSpecs: ReadonlyArray<{ az: number; y: number }> = [
+    { az: 0.7, y: 0.188 }, // front-right through the glass in lineup
+    { az: -2.4, y: 0.1865 }, // back-left, catches the probe turntable
+  ]
   const tea = buildLiquid(
     inner,
     FILL_Y,
     {
-      color: 0xffffff, // the read lives in the ramp map below
-      attenuationColor: 0x4a2002,
-      attenuationDistance: 0.02,
+      color: 0xc25708,
+      attenuationColor: 0x2e0f02, // ramp floor: dark steeped-tea brown
       roughness: 0.04,
     },
     { segments: 56 }
   )
+  const teaSurface = new THREE.Color(0xe88c2a)
   {
-    const ramp = liquidDepthGradient([
-      { v: 0.0, color: '#3a1401' }, // floor: reads nearly black through glass
-      { v: 0.3, color: '#642803' },
-      { v: 0.62, color: '#9c4306' },
-      { v: 0.85, color: '#c65f0a' },
-      { v: 1.0, color: '#e07c12' }, // meniscus: sunlit hot amber
-    ])
-    const vm = tea.volumeMesh.material as THREE.MeshPhysicalMaterial
-    vm.map = ramp
-    vm.sheen = 0.85 // grazing-angle warm bleed = fake edge translucency
-    vm.sheenColor = new THREE.Color(0xff9226)
-    vm.sheenRoughness = 0.38
-    vm.clearcoat = 0.5
-    vm.clearcoatRoughness = 0.08
-    vm.specularIntensity = 0.55
-    const cm = tea.capMesh.material as THREE.MeshPhysicalMaterial
-    cm.color.set(0xd8720f) // surface disc: the ramp's hot end, lifted a touch
-    cm.sheen = 0.5
-    cm.sheenColor = new THREE.Color(0xffa03a)
-    cm.sheenRoughness = 0.4
-    cm.clearcoat = 0.5
-    cm.clearcoatRoughness = 0.08
+    const geo = tea.volumeMesh.geometry
+    geo.computeBoundingBox()
+    const yMin = geo.boundingBox!.min.y
+    const span = Math.max(1e-6, geo.boundingBox!.max.y - yMin)
+    const vOf = (y: number): number => (y - yMin) / span
+    const rWall = innerRadiusAt(inner, FILL_Y) - 0.0005
+    const teaMat = tea.volumeMesh.material as THREE.MeshPhysicalMaterial
+    teaMat.map = liquidBodyTexture({
+      stops: [
+        // authored PAST amber toward orange-brown: AgX + the warm key pull
+        // the render back toward salmon-pink; these land on iced-tea amber
+        { v: 0.0, color: '#1c0801' },
+        { v: 0.3, color: '#521803' },
+        { v: 0.62, color: '#8f3005' },
+        { v: 0.85, color: '#bd5407' },
+        { v: 0.965, color: '#e2841a' },
+        { v: 1.0, color: '#eb9226' },
+      ],
+      vFill: vOf(FILL_Y),
+      veil: '#7c2e05',
+      rind: '#f0d060',
+      pith: '#f7ecc0',
+      pulp: '#ecc84e',
+      wheels: wheelSpecs.map((s) => ({
+        u: ((s.az % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI * 2),
+        v: vOf(s.y),
+        ru: wheelR / rWall / (Math.PI * 2),
+        rv: wheelR / span,
+      })),
+    })
+    teaMat.color.set(0xffffff)
+    // the lib's broad sheen reads as a pink-white wash over a dark body —
+    // keep only a sliver of grazing lift
+    teaMat.sheen = 0.18
+    // the cap must meet the wall's surface stop at the meniscus or it bands
+    const capMat = tea.capMesh.material as THREE.MeshPhysicalMaterial
+    capMat.color.copy(teaSurface).lerp(new THREE.Color(0xffffff), 0.08)
+    capMat.envMapIntensity = 1.0 // 1.3 skimmed past the bloom threshold
   }
 
-  // ---- ice: 5 lumps riding ~80% submerged ---------------------------------
+  // ---- ice: 5 lumps riding ~80% submerged, wet band at the waterline ------
   const ice = floatingIce({
     count: 5,
     size: 0.024,
     fillY: FILL_Y,
-    spreadRadius: 0.03,
-    freeboard: 0.2,
+    spreadRadius: 0.033, // spread toward the walls — a centred clump reads
+    freeboard: 0.18, // as one blob at game distance
     seed: 99,
+    waterline: teaSurface.clone().multiplyScalar(0.72),
   })
 
   // ---- two lemon wheels leaning on the inside wall ------------------------
-  // Coin-against-the-wall pose: top edge kisses the inner wall above the tea
-  // line, bottom edge submerged (the opaque-pass tea hides it — the visible
-  // half reads pressed against the glass, which is the story).
-  const wheelProto = citrusWheel({ radius: 0.025, thickness: 0.0065, seed: 21 })
+  // Coin-against-the-wall pose: a modest crescent above the tea line, the
+  // painted ghost continuing it below — one wheel crossing the surface.
+  const wheelProto = citrusWheel({ radius: wheelR, thickness: 0.0065, seed: 21 })
   const wheels = new THREE.Group()
   const lean = 0.3 // rad from vertical, top edge outward
-  const wheelSpecs: ReadonlyArray<{ az: number; y: number }> = [
-    { az: 0.7, y: 0.192 }, // front-right through the glass in lineup
-    { az: -2.4, y: 0.189 }, // back-left, catches the probe turntable
-  ]
   const up = new THREE.Vector3(0, 1, 0)
   for (const s of wheelSpecs) {
     const w = wheelProto.clone()
@@ -169,7 +199,16 @@ export function buildPitcher(): DrinkVisual {
 
   // ---- D-handle on +X: chunky pressed glass -------------------------------
   // Bulges to x+tube = 0.0748; both open tube ends buried inside the wall.
-  const handleMat = solidGlass({ thickness: 0.012 })
+  // Smoky sea-glass tint at env 1.0: the default pale mint @ 1.8 rendered the
+  // whole handle frosted bone-white (crit2 probe) and it melted into the sky
+  // at trio distance — a darker body keeps silhouette contrast, the clearcoat
+  // rim highlights keep it reading as glass.
+  const handleMat = solidGlass({
+    thickness: 0.012,
+    tint: 0x9bb8ab,
+    roughness: 0.12,
+    envMapIntensity: 1.0,
+  })
   const handle = tubeHandle({
     points: [
       [0.0440, 0.2140, 0],

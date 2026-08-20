@@ -8,7 +8,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
 /**
  * The one post chain: Render -> GTAO (subtle, clipped to the table zone) ->
- * UnrealBloom (threshold 0.95 so ONLY glints and the sun disc bloom) ->
+ * UnrealBloom (threshold 1.0 — critic r1: metal lids bloomed into lamps at 0.95) ->
  * SMAA -> Output (AgX + sRGB). `lowPower` drops GTAO for phone GPUs.
  */
 export interface PostOptions {
@@ -53,7 +53,7 @@ export function createPost(
     composer.addPass(gtao)
   }
 
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.25, 0.4, 0.95)
+  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.22, 0.35, 1.0)
   composer.addPass(bloom)
   composer.addPass(new SMAAPass())
   composer.addPass(new OutputPass())

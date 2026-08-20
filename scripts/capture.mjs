@@ -40,7 +40,8 @@ import { chromium } from 'playwright'
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
-    const m = a.match(/^--([^=]+)(?:=(.*))?$/)
+    // [\s\S] not (.*): a multi-line --eval must not silently truncate
+    const m = a.match(/^--([^=]+)(?:=([\s\S]*))?$/)
     return m ? [m[1], m[2] ?? true] : [a, true]
   })
 )
@@ -191,7 +192,12 @@ async function main() {
   }
 }
 
+// Retry the whole run once: concurrent agents editing source can trigger a
+// vite reload mid-capture ("Execution context was destroyed").
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
+  console.error('[capture] first attempt failed, retrying once:', err?.message ?? err)
+  main().catch((err2) => {
+    console.error(err2)
+    process.exit(1)
+  })
 })

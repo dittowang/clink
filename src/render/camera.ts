@@ -62,13 +62,21 @@ export function createCameraRig(viewW: number, viewH: number): CameraRig {
     },
     update(dt) {
       if (!active) return
-      // semi-implicit critically damped spring
+      // semi-implicit critically damped spring. Substep: at OMEGA=50 the
+      // integrator is only stable for dt < ~2/OMEGA — a 0.1 s harness slice
+      // or a sub-50fps frame would detonate it into NaN without this.
       const k = OMEGA * OMEGA
       const c = 2 * OMEGA
-      velX += (-k * offX - c * velX) * dt
-      velY += (-k * offY - c * velY) * dt
-      offX += velX * dt
-      offY += velY * dt
+      const MAX_STEP = 0.012
+      let remaining = Math.min(dt, 0.1)
+      while (remaining > 0) {
+        const h = Math.min(remaining, MAX_STEP)
+        remaining -= h
+        velX += (-k * offX - c * velX) * h
+        velY += (-k * offY - c * velY) * h
+        offX += velX * h
+        offY += velY * h
+      }
       if (Math.abs(offX) < 1e-6 && Math.abs(offY) < 1e-6 && Math.abs(velX) < 1e-5 && Math.abs(velY) < 1e-5) {
         offX = offY = velX = velY = 0
         camera.position.copy(base)

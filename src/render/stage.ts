@@ -23,6 +23,8 @@ export interface StageOptions {
 export interface Stage {
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
+  /** canonical camera pose (no nudge/sequence); refreshed on resize */
+  cameraBase: { pos: THREE.Vector3; quat: THREE.Quaternion }
   sun: THREE.DirectionalLight
   tableGroup: THREE.Group
   setPreset(p: PresetName): void
@@ -114,6 +116,7 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
   return {
     scene,
     camera: rig.camera,
+    cameraBase: { pos: rig.basePos, quat: rig.baseQuat },
     sun,
     get tableGroup() {
       return tableGroup

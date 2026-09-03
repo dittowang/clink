@@ -23,9 +23,12 @@ import { TIERS, nextTier, type TierId } from '../config/tiers'
  * radius get a small radial impulse (target NEIGHBOR_DV each, scaled by
  * mass) so they make room without flying.
  *
- * The MERGE_MAX_SPEED gate is what keeps a drink in flight out of a merge:
- * a launched body moves at 1.5-3 m/s, so it can never be stolen mid-air; it
- * joins the component naturally once contact friction has slowed it down.
+ * Speed is NOT gated: a launched drink that reaches two same-tier drinks
+ * merges the instant it comes within PROXIMITY_SLOP_M of them — the merge
+ * fires from the pre-contact proximity edge, before the solver has applied a
+ * single impact impulse, so the pair is absorbed instead of scattered. (An
+ * earlier 0.6 m/s gate made arrivals knock the pair apart and miss the merge
+ * entirely — the player's reading was "the engine is too sensitive".)
  *
  * Chain: a mergeDone within CHAIN_WINDOW_S of the previous one increments
  * the chain (x1.5 per link). score = tier_result^2 * 10 * 1.5^(chain-1),
@@ -37,8 +40,6 @@ const GROW_S = 0.24
 const GROW_FROM = 0.4
 const SHRINK_TO = 0.25
 export const CHAIN_WINDOW_S = 1.0
-/** bodies at or above this planar speed (m/s) never participate in a merge */
-const MERGE_MAX_SPEED = 0.6
 /** neighbours within this multiple of the new drink's radius get shoved */
 const NEIGHBOR_RADIUS_X = 1.6
 /** target outward speed for shoved neighbours (m/s) */
@@ -46,11 +47,12 @@ const NEIGHBOR_DV = 0.25
 /**
  * Same-tier drinks whose footprint GAP is under this count as touching for
  * the component BFS. The contact graph stays primary — the slop only ADDS
- * edges. Why: a merge-grown drink can come to rest 1–4 mm from two same-tier
- * neighbours (collider grow + neighbour shove timing) without Rapier ever
- * reporting a contact pair, silently missing the follow-up cascade merge.
+ * edges. 2 cm (up from 5 mm) does two jobs: a merge-grown drink resting a
+ * few mm from two neighbours still cascades, and an arriving drink at 2 m/s
+ * (17 mm per fixed step) is caught on the step BEFORE it physically hits, so
+ * "almost touching" merges and nothing gets knocked away first.
  */
-const PROXIMITY_SLOP_M = 0.005
+const PROXIMITY_SLOP_M = 0.02
 
 export function mergeScore(resultTier: TierId, chain: number): number {
   return Math.round(resultTier * resultTier * 10 * Math.pow(1.5, chain - 1))
@@ -141,7 +143,7 @@ export class MergeSystem {
   private scan(): void {
     for (const arr of this.groups.values()) arr.length = 0
     for (const d of this.world.all) {
-      if (d.state !== 'live' || d.speed >= MERGE_MAX_SPEED) continue
+      if (d.state !== 'live') continue
       let arr = this.groups.get(d.tier)
       if (!arr) {
         arr = []

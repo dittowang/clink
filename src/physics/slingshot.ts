@@ -8,34 +8,25 @@ import { applyLaunch, launchImpulse, predictStopDistance } from './impulse'
  * SlingshotController — pointer → aim → launch. The ONLY path from input to
  * motion: release calls applyLaunch (impulse.ts), never setLinvel.
  *
- * Aim model (direction only, uniform power): pointer ray is intersected with
- * the table plane y = SURFACE_Y; the launch direction is drink origin → hit,
- * i.e. the player points AT the target, so the pointer travels up the table
- * and never leaves the window. Every launch fires at LAUNCH_POWER — the
- * ladder's tuning point — so weight is read purely from how far each tier
- * slides. Releasing with the pointer still inside CANCEL_RADIUS of the drink
- * (no direction chosen) emits 'pullCancel' instead of launching. Aims that
- * point back toward the player are clamped to ±MAX_AIM_DEG from straight
- * ahead so a stray release never flings the drink off the open edge.
+ * Aim model (swipe direction, uniform power): press ANYWHERE the pointer ray
+ * meets the table plane (table or sand) and drag — the launch direction is
+ * the swipe vector (press point → current point) on that plane, so the
+ * gesture works identically wherever the thumb lands and never has to start
+ * on the drink. Every launch fires at LAUNCH_POWER — the ladder's tuning
+ * point — so weight is read purely from how far each tier slides. A release
+ * before the pointer has travelled DRAG_MIN is a tap → 'pullCancel', never a
+ * launch. Swipes aimed back toward the player are clamped to ±MAX_AIM_DEG
+ * from straight ahead so a stray flick never sends the drink off the open
+ * near edge.
  */
 
 /** every launch fires at this pull01 — the ladder (massLadder.ts) is tuned here */
 export const LAUNCH_POWER = 1.0
 
-/** release inside this radius of the drink origin (m) is a cancel, not a launch */
-const CANCEL_RADIUS = 0.04
-
 /**
- * the press must START within this radius of the drink (m on the table).
- * With uniform power a press anywhere would be a tap-to-fire; stray taps
- * (dismissing a score pop, brushing the HUD) must never launch.
- */
-const START_RADIUS = 0.12
-
-/**
- * the pointer must travel at least this far (m on the table) from where it
- * pressed before a release counts as an aim — a tap, even slightly off the
- * drink, is never a launch.
+ * the pointer must travel at least this far (m on the table plane) from where
+ * it pressed before a release counts as an aim — a tap anywhere (dismissing a
+ * score pop, brushing the HUD) is never a launch.
  */
 const DRAG_MIN = 0.05
 
@@ -200,7 +191,6 @@ export class SlingshotController {
     const d = this.drink
     if (!d || this.pulling) return
     if (!this.raycast(e)) return
-    if (Math.hypot(_hit.x - d.currPos.x, _hit.z - d.currPos.z) > START_RADIUS) return
     this.pulling = true
     this.pointerId = e.pointerId
     try {
@@ -262,19 +252,18 @@ export class SlingshotController {
   private updatePull(): void {
     const d = this.drink
     if (!d) return
-    const dx = _hit.x - this.originX
-    const dz = _hit.z - this.originZ
-    const len = Math.hypot(dx, dz)
-    if (!this.dragged && Math.hypot(_hit.x - this.pressX, _hit.z - this.pressZ) >= DRAG_MIN) {
-      this.dragged = true
-    }
-    if (!this.dragged || len < CANCEL_RADIUS) {
-      // a tap (no drag yet) or the pointer back on the drink: cancel armed
+    // swipe vector on the table plane: press point → current pointer
+    const dx = _hit.x - this.pressX
+    const dz = _hit.z - this.pressZ
+    if (!this.dragged && Math.hypot(dx, dz) >= DRAG_MIN) this.dragged = true
+    if (!this.dragged) {
+      // a tap (no drag yet): cancel armed, nothing to aim with
       this.pull01 = 0
     } else {
       this.pull01 = LAUNCH_POWER
-      // angle from −Z toward +X — the impulse.ts convention; the player
-      // points AT the target, clamped so nothing aims back off the open edge
+      // angle from −Z toward +X — the impulse.ts convention; the swipe
+      // direction IS the launch direction, clamped so nothing aims back off
+      // the open edge
       const maxAim = (MAX_AIM_DEG * Math.PI) / 180
       this.angle = clamp(Math.atan2(dx, -dz), -maxAim, maxAim)
       this.dirX = Math.sin(this.angle)

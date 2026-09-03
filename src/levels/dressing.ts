@@ -72,12 +72,15 @@ function wetAlphaTexture(): THREE.CanvasTexture {
 // ---- umbrella ----
 
 const PLEATS = 10
-// canopy raised 10 cm + radius −12% so the noon playfield breathes (the old
-// 0.85 m canopy at 1.94 m filled half the frame and shaded the whole plank).
+// Canopy rim sits ABOVE the game camera's top-edge ray: with the table-fit
+// camera at ~42° elevation the frame's top edge passes ~2.1 m over the near
+// half of the canopy, so a rim below that eats the top fifth of the screen.
+// 2.2 m is also simply how tall a real beach umbrella stands. Radius −12% vs
+// the original so the plank is shaded but the sand still shows around it.
 // The POLE COLLIDER (world.addPole) is untouched — gameplay-verified.
 const CANOPY_R = 0.75
-const CANOPY_TOP_Y = 2.04
-const CANOPY_BASE_Y = 1.72
+const CANOPY_TOP_Y = 2.54
+const CANOPY_BASE_Y = 2.22
 const FRINGE_SCALLOPS = 22
 
 function pleatScale(ang: number): number {

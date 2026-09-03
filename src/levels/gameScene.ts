@@ -137,8 +137,10 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   const unsubAudio = subscribeAudio(bus)
   const unsubGesture = resumeOnGesture(ctx.renderer.domElement)
 
-  const camBasePos = stage.camera.position.clone()
-  const camBaseQuat = stage.camera.quaternion.clone()
+  // the rig re-fits the table on resize; sequences ease from whatever the
+  // canonical pose is NOW, so read it live rather than snapshotting once
+  const camBasePos = stage.cameraBase.pos
+  const camBaseQuat = stage.cameraBase.quat
 
   // ---- per-level state (rebuilt by loadLevel) ----
 

@@ -5,22 +5,45 @@ import type { Drink } from '../core/drink'
 import { applyLaunch, launchImpulse, predictStopDistance } from './impulse'
 
 /**
- * SlingshotController — pointer → pull → launch. The ONLY path from input to
+ * SlingshotController — pointer → aim → launch. The ONLY path from input to
  * motion: release calls applyLaunch (impulse.ts), never setLinvel.
  *
- * Pull model: pointer ray is intersected with the table plane y = SURFACE_Y.
- * The drag offset (hit − drink origin) counts only while it points BACKWARD
- * (+Z, toward the player); its length is clamped to MAX_PULL. pull01 =
- * len / MAX_PULL, aim = the normalized opposite of the drag. Dragging back
- * onto/past the origin (pull01 < 0.05) arms a cancel — release then emits
- * 'pullCancel' instead of launching; dragging out again re-arms the launch.
+ * Aim model (direction only, uniform power): pointer ray is intersected with
+ * the table plane y = SURFACE_Y; the launch direction is drink origin → hit,
+ * i.e. the player points AT the target, so the pointer travels up the table
+ * and never leaves the window. Every launch fires at LAUNCH_POWER — the
+ * ladder's tuning point — so weight is read purely from how far each tier
+ * slides. Releasing with the pointer still inside CANCEL_RADIUS of the drink
+ * (no direction chosen) emits 'pullCancel' instead of launching. Aims that
+ * point back toward the player are clamped to ±MAX_AIM_DEG from straight
+ * ahead so a stray release never flings the drink off the open edge.
  */
 
-/** full-power drag length (m on the table plane) — a comfortable thumb arc */
-export const MAX_PULL = 0.45
+/** every launch fires at this pull01 — the ladder (massLadder.ts) is tuned here */
+export const LAUNCH_POWER = 1.0
 
-/** below this pull the release is a cancel, not a feeble launch */
-const CANCEL_PULL = 0.05
+/** release inside this radius of the drink origin (m) is a cancel, not a launch */
+const CANCEL_RADIUS = 0.04
+
+/**
+ * the press must START within this radius of the drink (m on the table).
+ * With uniform power a press anywhere would be a tap-to-fire; stray taps
+ * (dismissing a score pop, brushing the HUD) must never launch.
+ */
+const START_RADIUS = 0.12
+
+/**
+ * the pointer must travel at least this far (m on the table) from where it
+ * pressed before a release counts as an aim — a tap, even slightly off the
+ * drink, is never a launch.
+ */
+const DRAG_MIN = 0.05
+
+/** widest aim from straight ahead (−Z); still lets bank shots hit the side rails */
+const MAX_AIM_DEG = 82
+
+/** kept for API compatibility with the ladder harness scene */
+export const MAX_PULL = 0.45
 
 // aim visuals sit just above the plank to avoid z-fighting
 const AIM_Y = SURFACE_Y + 0.003
@@ -40,6 +63,9 @@ export class SlingshotController {
   private angle = 0
   private originX = 0
   private originZ = 0
+  private pressX = 0
+  private pressZ = 0
+  private dragged = false
   private dirX = 0
   private dirZ = -1
   private pulseT = 0
@@ -174,6 +200,7 @@ export class SlingshotController {
     const d = this.drink
     if (!d || this.pulling) return
     if (!this.raycast(e)) return
+    if (Math.hypot(_hit.x - d.currPos.x, _hit.z - d.currPos.z) > START_RADIUS) return
     this.pulling = true
     this.pointerId = e.pointerId
     try {
@@ -183,6 +210,9 @@ export class SlingshotController {
     }
     this.originX = d.currPos.x
     this.originZ = d.currPos.z
+    this.pressX = _hit.x
+    this.pressZ = _hit.z
+    this.dragged = false
     this.pull01 = 0
     this.bus.emit('pullStart', {})
     this.updatePull()
@@ -197,18 +227,18 @@ export class SlingshotController {
   private readonly onUp = (e: PointerEvent): void => {
     if (!this.pulling || e.pointerId !== this.pointerId) return
     const d = this.drink
-    const pull = this.pull01
+    const aimed = this.pull01 > 0
     const angle = this.angle
     this.endPull()
     if (!d) return
-    if (pull < CANCEL_PULL) {
+    if (!aimed) {
       this.bus.emit('pullCancel', {})
       return
     }
-    applyLaunch(d, angle, pull)
+    applyLaunch(d, angle, LAUNCH_POWER)
     d.state = 'live'
     this.drink = null
-    this.bus.emit('launch', { id: d.id, tier: d.tier, impulse: launchImpulse(d.tier, pull) })
+    this.bus.emit('launch', { id: d.id, tier: d.tier, impulse: launchImpulse(d.tier, LAUNCH_POWER) })
   }
 
   private endPull(): void {
@@ -228,37 +258,40 @@ export class SlingshotController {
     return this.raycaster.ray.intersectPlane(this.plane, _hit) !== null
   }
 
-  /** recompute pull/aim from _hit and refresh visuals + 'pullMove' */
+  /** recompute aim from _hit and refresh visuals + 'pullMove' */
   private updatePull(): void {
     const d = this.drink
     if (!d) return
     const dx = _hit.x - this.originX
     const dz = _hit.z - this.originZ
-    if (dz <= 0) {
-      // dragged forward of the origin: backward-only rule → armed cancel
+    const len = Math.hypot(dx, dz)
+    if (!this.dragged && Math.hypot(_hit.x - this.pressX, _hit.z - this.pressZ) >= DRAG_MIN) {
+      this.dragged = true
+    }
+    if (!this.dragged || len < CANCEL_RADIUS) {
+      // a tap (no drag yet) or the pointer back on the drink: cancel armed
       this.pull01 = 0
     } else {
-      const len = Math.min(Math.hypot(dx, dz), MAX_PULL)
-      this.pull01 = len / MAX_PULL
-      if (len > 1e-5) {
-        this.dirX = -dx / Math.hypot(dx, dz)
-        this.dirZ = -dz / Math.hypot(dx, dz)
-        // angle from −Z toward +X — the impulse.ts convention
-        this.angle = Math.atan2(this.dirX, -this.dirZ)
-      }
+      this.pull01 = LAUNCH_POWER
+      // angle from −Z toward +X — the impulse.ts convention; the player
+      // points AT the target, clamped so nothing aims back off the open edge
+      const maxAim = (MAX_AIM_DEG * Math.PI) / 180
+      this.angle = clamp(Math.atan2(dx, -dz), -maxAim, maxAim)
+      this.dirX = Math.sin(this.angle)
+      this.dirZ = -Math.cos(this.angle)
     }
 
     _pullMove.pull01 = this.pull01
     this.bus.emit('pullMove', _pullMove)
 
-    if (this.pull01 < CANCEL_PULL) {
+    if (this.pull01 <= 0) {
       this.group.visible = false // cancel armed: no aim, no marker
       return
     }
     this.group.visible = true
 
     // stop marker at origin + dir · predicted, clamped inside the rails
-    const dist = predictStopDistance(d.tier, this.pull01)
+    const dist = predictStopDistance(d.tier, LAUNCH_POWER)
     const r = d.def.radius
     const mx = clamp(this.originX + this.dirX * dist, -this.halfW + r, this.halfW - r)
     const mz = clamp(this.originZ + this.dirZ * dist, FAR_Z + r, NEAR_Z)

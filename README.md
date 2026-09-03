@@ -17,8 +17,9 @@ That's it. `npm run build` emits a static `dist/` folder for any host.
 
 ## Play
 
-- **Drag back** from the drink in the cradle and release to slide it.
-  The ring on the table shows where it will stop — heavier drinks stop
+- **Press on the drink in the cradle, point where you want it to go, and
+  release** — every push fires at the same strength, so aim is the whole
+  game. The ring on the table shows where it will stop — heavier drinks stop
   shorter, so watch the marker retreat when a pitcher comes up.
 - **Three of a kind touching** merge into the next tier. Chains within a
   second multiply ×1.5 per link.

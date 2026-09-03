@@ -75,8 +75,8 @@ tray. Deterministic from the seeded Rng stream.
 
 ## Turn loop (beat by beat, from the brief)
 
-spawn drop 5 cm into cradle (soft thud) → aim (pull clamps at full, drag back
-onto origin cancels; camera frozen) → release: impulse + slide noise → contacts:
+spawn drop 5 cm into cradle (soft thud) → aim (direction only — point AT the target, uniform full power;
+releasing with the pointer still on the drink cancels; camera frozen) → release: impulse + slide noise → contacts:
 force-scaled clink + camera nudge (only above force threshold) → merge check
 (chain ×1.5 within 1 s) → next drink when all speeds < SETTLE_SPEED or 1.6 s
 elapsed, whichever first. Foul: any drink at rest past FOUL_Z for 2.5 s → run

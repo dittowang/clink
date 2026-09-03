@@ -1,0 +1,138 @@
+{
+  "state": {
+    "mode": "sequence",
+    "phase": "finished",
+    "tier": null,
+    "completed": 12,
+    "done": true,
+    "impacts": 12,
+    "lastImpact": {
+      "force": 196.0477,
+      "matA": "wood",
+      "matB": "glass"
+    },
+    "active": null
+  },
+  "logs": [
+    {
+      "tier": 1,
+      "launchZ": 0.78,
+      "stopZ": -0.605,
+      "distance": 1.385,
+      "predicted": 1.3871,
+      "ratio": 0.9985,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 2,
+      "launchZ": 0.78,
+      "stopZ": -0.544,
+      "distance": 1.324,
+      "predicted": 1.326,
+      "ratio": 0.9985,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 3,
+      "launchZ": 0.78,
+      "stopZ": -0.4821,
+      "distance": 1.2621,
+      "predicted": 1.2642,
+      "ratio": 0.9983,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 4,
+      "launchZ": 0.78,
+      "stopZ": -0.4388,
+      "distance": 1.2188,
+      "predicted": 1.2207,
+      "ratio": 0.9985,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 5,
+      "launchZ": 0.78,
+      "stopZ": -0.3809,
+      "distance": 1.1609,
+      "predicted": 1.1629,
+      "ratio": 0.9983,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 6,
+      "launchZ": 0.78,
+      "stopZ": -0.3299,
+      "distance": 1.1099,
+      "predicted": 1.1118,
+      "ratio": 0.9983,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 7,
+      "launchZ": 0.78,
+      "stopZ": -0.2727,
+      "distance": 1.0527,
+      "predicted": 1.0547,
+      "ratio": 0.9981,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 8,
+      "launchZ": 0.78,
+      "stopZ": -0.2236,
+      "distance": 1.0036,
+      "predicted": 1.0055,
+      "ratio": 0.9982,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 9,
+      "launchZ": 0.78,
+      "stopZ": -0.1813,
+      "distance": 0.9613,
+      "predicted": 0.9632,
+      "ratio": 0.9981,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 10,
+      "launchZ": 0.78,
+      "stopZ": -0.1403,
+      "distance": 0.9203,
+      "predicted": 0.9221,
+      "ratio": 0.998,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 11,
+      "launchZ": 0.78,
+      "stopZ": -0.1093,
+      "distance": 0.8893,
+      "predicted": 0.8913,
+      "ratio": 0.9978,
+      "hitFarRail": false,
+      "crossedMidline": true
+    },
+    {
+      "tier": 12,
+      "launchZ": 0.78,
+      "stopZ": -0.0822,
+      "distance": 0.8622,
+      "predicted": 0.864,
+      "ratio": 0.9979,
+      "hitFarRail": false,
+      "crossedMidline": true
+    }
+  ]
+}

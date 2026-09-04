@@ -1,13 +1,6 @@
 import * as THREE from 'three'
 import type { BootCtx, SceneHandle } from '../main'
-import {
-  SURFACE_Y,
-  NEAR_Z,
-  CRADLE_Z,
-  FOUL_Z,
-  FOUL_GRACE_S,
-  SETTLE_SPEED,
-} from '../config/table'
+import { TABLE, SURFACE_Y, NEAR_Z, CRADLE_Z, FOUL_Z, FOUL_GRACE_S, SETTLE_SPEED } from '../config/table'
 import { TIERS, type TierId } from '../config/tiers'
 import { levelById, levelSeed, LEVELS, starsToUnlockChapter, type LevelDef } from '../config/levels'
 import { bus } from '../core/events'
@@ -379,7 +372,9 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     stage.camera.position.copy(camBasePos)
     stage.camera.quaternion.copy(camBaseQuat)
 
-    trayGroup.position.set(world.halfW - 0.09, world.surfaceYAt(TRAY_Z), TRAY_Z)
+    // the tray lives on a stool BESIDE the table (off the playfield) — on the
+    // 0.65 m plank a tray inside the rails ate the cradle's elbow room
+    trayGroup.position.set(world.halfW + TABLE.RAIL_T + 0.12, SURFACE_Y, TRAY_Z)
     refreshTray()
     spawnCradle()
     log('levelLoad', { level: def.id })
@@ -536,6 +531,16 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   trayMesh.castShadow = true
   trayMesh.receiveShadow = true
   trayGroup.add(trayMesh)
+  // stool under the tray: one turned leg + a foot, sand to table height
+  const stoolMat = new THREE.MeshStandardMaterial({ color: 0x6d4c2e, roughness: 0.8 })
+  const stoolLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.026, TABLE.TOP_Y - 0.02, 16), stoolMat)
+  stoolLeg.position.y = -(TABLE.TOP_Y - 0.02) / 2
+  stoolLeg.castShadow = true
+  const stoolFoot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.02, 24), stoolMat)
+  stoolFoot.position.y = -TABLE.TOP_Y + 0.01
+  stoolFoot.castShadow = true
+  stoolFoot.receiveShadow = true
+  trayGroup.add(stoolLeg, stoolFoot)
   trayGroup.position.set(0.31, SURFACE_Y, TRAY_Z)
   stage.scene.add(trayGroup)
 

@@ -6,9 +6,14 @@
  * right. All gameplay happens in table-surface coordinates.
  */
 export const TABLE = {
-  /** playfield half-extents (m): 1.8 m long (Z), 0.8 m wide (X) */
-  HALF_W: 0.4,
-  HALF_L: 0.9,
+  /**
+   * playfield half-extents (m): 1.5 m long (Z), 0.65 m wide (X).
+   * Shrunk from 1.8 × 0.8 (2026-09-05): with every push reaching the far
+   * rail the pile grows back from the far end, and on the big table the
+   * runway to the foul line was so long that Endless never ended.
+   */
+  HALF_W: 0.325,
+  HALF_L: 0.75,
   /** table top height above the sand (m) */
   TOP_Y: 0.72,
   /** plank thickness (m) */
@@ -16,10 +21,10 @@ export const TABLE = {
   /** rail height above the table top and rail thickness (m) */
   RAIL_H: 0.045,
   RAIL_T: 0.03,
-  /** foul line distance from the near (open) edge (m) — brief: 25-30 cm */
-  FOUL_FROM_NEAR: 0.28,
+  /** foul line distance from the near (open) edge (m) */
+  FOUL_FROM_NEAR: 0.25,
   /** launch cradle centre, distance from near edge (m) */
-  CRADLE_FROM_NEAR: 0.12,
+  CRADLE_FROM_NEAR: 0.11,
 } as const
 
 /** z of the near (open) edge */

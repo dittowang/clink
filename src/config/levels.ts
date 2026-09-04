@@ -45,7 +45,7 @@ export interface LevelDef {
 }
 
 // Ch.2 shared dressing: narrow table + umbrella pole at (0, -0.15)
-const NOON = { tableHalfW: 0.3, umbrella: { x: 0, z: -0.15 } }
+const NOON = { tableHalfW: 0.25, umbrella: { x: 0, z: -0.15 } }
 
 export const LEVELS: readonly LevelDef[] = [
   // ---- Ch.1 Morning — wide table, teach the pull ----
@@ -56,7 +56,7 @@ export const LEVELS: readonly LevelDef[] = [
   { id: 5, chapter: 1, preset: 'morning', pool: [1, 2, 3, 4], goal: { kind: 'score', score: 2500 }, pushes: 18, stars: [2500, 4000, 6500] },
   { id: 6, chapter: 1, preset: 'morning', pool: [1, 2, 3, 4], goal: { kind: 'score', score: 4000 }, pushes: 22, stars: [4000, 6400, 10400] },
 
-  // ---- Ch.2 Noon — tableHalfW 0.3, umbrella pole at (0, -0.15) ----
+  // ---- Ch.2 Noon — tableHalfW 0.25, umbrella pole at (0, -0.15) ----
   { id: 7, chapter: 2, preset: 'noon', pool: [2, 3], goal: { kind: 'score', score: 1500 }, pushes: 12, stars: [1500, 2400, 3900], mods: { ...NOON } },
   { id: 8, chapter: 2, preset: 'noon', pool: [2, 3, 4], goal: { kind: 'score', score: 2500 }, pushes: 14, stars: [2500, 4000, 6500], mods: { ...NOON } },
   { id: 9, chapter: 2, preset: 'noon', pool: [2, 3, 4, 5], goal: { kind: 'survive', pushes: 22 }, pushes: null, stars: [700, 1120, 1820], mods: { ...NOON } },

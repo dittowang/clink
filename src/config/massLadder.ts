@@ -33,7 +33,7 @@ export const MASS_KG: Readonly<Record<number, number>> = {
  *
  * Each launch gives the drink exactly the speed whose free slide would stop
  * TARGET_STOP_M out — a little beyond the far rail (travel from the cradle
- * to the rail face is ~1.65 m), so an unobstructed drink always arrives with
+ * to the rail face is ~1.36 m on the 1.5 m table), so an unobstructed drink always arrives with
  * a modest residual speed, taps the rail and settles; anything it meets on
  * the way is resolved by the collision (momentum: a 5 kg dispenser at that
  * speed plows, a 0.2 kg juice box bounces off). The speed is solved per tier
@@ -45,4 +45,4 @@ export const MASS_KG: Readonly<Record<number, number>> = {
  * far end" a worse read than losing the stop-distance weight cue; weight now
  * reads through collisions (plow vs bounce), launch lean and the clink.
  */
-export const TARGET_STOP_M = 1.95
+export const TARGET_STOP_M = 1.62

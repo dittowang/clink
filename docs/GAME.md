@@ -36,7 +36,7 @@ Ch.1 Morning — wide table, teach the pull:
 - L5  pool [1,2,3,4]    score 2500, 18 pushes
 - L6  pool [1,2,3,4]    score 4000, 22 pushes
 
-Ch.2 Noon — tableHalfW 0.3, umbrella pole at (0, -0.15):
+Ch.2 Noon — tableHalfW 0.25, umbrella pole at (0, -0.15):
 - L7  pool [2,3]        score 1500, 12
 - L8  pool [2,3,4]      score 2500, 14
 - L9  pool [2,3,4,5]    survive 22

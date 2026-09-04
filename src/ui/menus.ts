@@ -67,6 +67,24 @@ function button(label: string, css: string, onClick: () => void): HTMLButtonElem
   return b
 }
 
+/** the Clink wordmark (title screen + loading overlay share it) */
+export function wordmark(size: number): HTMLDivElement {
+  const w = el('div', `font-size:${size}px;font-weight:800;letter-spacing:.01em;line-height:1;`)
+  const grad =
+    'background:linear-gradient(160deg,#fff 20%,#ffd9a0 55%,#ffb45c 100%);' +
+    '-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;'
+  const c = el('span', grad + 'display:inline-block;transform:rotate(-6deg);', 'C')
+  const rest = el('span', grad + 'display:inline-block;', 'link')
+  const glint = el(
+    'span',
+    'display:inline-block;color:#ffe9c9;transform:translateY(-.55em);font-size:.34em;',
+    '✦'
+  )
+  w.append(c, rest, glint)
+  w.style.filter = 'drop-shadow(0 4px 18px rgba(255,180,92,.35))'
+  return w
+}
+
 export function createMenus(cb: MenuCallbacks): Menus {
   const ui = document.getElementById('ui') ?? document.body
   const root = el('div', 'position:absolute;inset:0;display:none;')
@@ -110,23 +128,6 @@ export function createMenus(cb: MenuCallbacks): Menus {
     // fade every panel in — a full-opacity same-frame appearance reads as a cut
     requestAnimationFrame(() => { p.style.opacity = '1' })
     return p
-  }
-
-  function wordmark(size: number): HTMLDivElement {
-    const w = el('div', `font-size:${size}px;font-weight:800;letter-spacing:.01em;line-height:1;`)
-    const grad =
-      'background:linear-gradient(160deg,#fff 20%,#ffd9a0 55%,#ffb45c 100%);' +
-      '-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;'
-    const c = el('span', grad + 'display:inline-block;transform:rotate(-6deg);', 'C')
-    const rest = el('span', grad + 'display:inline-block;', 'link')
-    const glint = el(
-      'span',
-      'display:inline-block;color:#ffe9c9;transform:translateY(-.55em);font-size:.34em;',
-      '✦'
-    )
-    w.append(c, rest, glint)
-    w.style.filter = 'drop-shadow(0 4px 18px rgba(255,180,92,.35))'
-    return w
   }
 
   function starRow(stars: number, size: number, stagger: boolean): HTMLDivElement {

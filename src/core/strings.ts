@@ -4,6 +4,7 @@ export type Locale = 'en' | 'zh-CN'
 const TABLE = {
   title:            { en: 'Clink', 'zh-CN': 'Clink 碰杯' },
   tapToStart:       { en: 'Tap to start', 'zh-CN': '点击开始' },
+  loading:          { en: 'Loading…', 'zh-CN': '加载中…' },
   play:             { en: 'Play', 'zh-CN': '开始游戏' },
   endless:          { en: 'Endless', 'zh-CN': '无尽模式' },
   chapters:         { en: 'Chapters', 'zh-CN': '章节' },

@@ -3,6 +3,8 @@ import { SURFACE_Y } from '../config/table'
 import { PRESETS, sunDirection, type PresetName, type LightingPreset } from './presets'
 import { createEnvironment } from './environment'
 import { createBeach } from './beach'
+import { createShore } from './shore'
+import { createScenery } from './scenery'
 import { createTable, disposeTable, type TableBuildOpts } from './table'
 import { createPost } from './post'
 import { createCameraRig } from './camera'
@@ -39,7 +41,36 @@ export interface Stage {
   /** impact nudge: <= 5 px along the impact axis, critically damped return */
   nudge(dir: THREE.Vector2, strength01: number): void
   preset(): PresetName
+  /**
+   * Boot warm-up (first-spawn hitch): with `extra` temporarily in the scene,
+   * precompile every program against the composer's render-target variant,
+   * upload every texture, and (unless `render: false`) run two real composer
+   * frames — they allocate the transmission + post targets and compile the
+   * shadow-depth and per-instance clip-plane variants only a real draw
+   * reaches. `sync` = no async compile (harness). Removes `extra` after.
+   * `render: false` is the compile-only mode the deferred fade-variant pass
+   * uses while the title screen is already up (nothing may be drawn then).
+   */
+  warmup(extra: THREE.Object3D[], opts: WarmupOptions): Promise<WarmupReport>
   dispose(): void
+}
+
+export type WarmupPhase = 'compile' | 'textures' | 'render'
+
+export interface WarmupOptions {
+  sync: boolean
+  /** default true; false = precompile + texture upload only, no frames */
+  render?: boolean
+  onPhase?: (phase: WarmupPhase) => void
+}
+
+export interface WarmupReport {
+  compileMs: number
+  textureMs: number
+  textures: number
+  /** first (compiles leftovers, allocates targets) and second (steady) frame */
+  renderMs: [number, number]
+  programs: number
 }
 
 /** distance of the light along the sun direction from the table centre */
@@ -59,12 +90,17 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
   // 2048 on the high tier; 1024 on mid/low (docs/PERF.md)
   const shadowSize = getQuality().shadowMapSize
   sun.shadow.mapSize.set(shadowSize, shadowSize)
-  // fitted to table + enough margin that the low-sun table shadow on the
-  // sand is never clipped (morning elev 17° throws ~2.4 m) — 2 mm/texel
+  // fitted to table + margin. Was ±2.1 (2 mm/texel): the edge decor's
+  // shadows land on sand out to |u|,|v| ≈ 2.8 in light space (palm fronds
+  // beside the palms at noon, by the table sides at night), so the high and
+  // mid tiers widen to keep them — 2.7 mm/texel at 2048, 5.1 mm at 1024.
+  // Low keeps the tight fit: its decor casts nothing. near pulled in so a
+  // 4 m palm crown (7 m up the sun axis) is inside the caster range.
+  const shadowHalf = { high: 2.8, mid: 2.6, low: 2.1 }[getQuality().tier]
   const sc = sun.shadow.camera
-  sc.left = -2.1; sc.right = 2.1
-  sc.top = 2.1; sc.bottom = -2.1
-  sc.near = SUN_DIST - 4
+  sc.left = -shadowHalf; sc.right = shadowHalf
+  sc.top = shadowHalf; sc.bottom = -shadowHalf
+  sc.near = SUN_DIST - 7.5
   sc.far = SUN_DIST + 8
   sun.shadow.bias = -0.00018
   sun.shadow.normalBias = 0.0025
@@ -77,6 +113,11 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
   const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy())
   const beach = createBeach(maxAniso)
   scene.add(beach.group)
+  // near shoreline + edge decor: the beach the table-fit camera can see
+  const shore = createShore()
+  scene.add(shore.group)
+  const scenery = createScenery(maxAniso)
+  scene.add(scenery.group)
 
   let tableGroup = createTable(maxAniso)
   scene.add(tableGroup)
@@ -109,6 +150,7 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
     fog.density = p.fogDensity
     renderer.toneMappingExposure = p.exposure
     beach.apply(p, sunDir)
+    shore.apply(p, sunDir)
     env.apply(p, sunDir)
   }
   applyPreset(PRESETS[current])
@@ -136,6 +178,7 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
       dynres.update()
       time += dt
       beach.update(time)
+      shore.update(time)
       rig.update(dt)
       post.render(dt)
     },
@@ -146,10 +189,84 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
     nudge(dir, strength01) {
       rig.nudge(dir, strength01)
     },
+    async warmup(extra, opts) {
+      const report: WarmupReport = {
+        compileMs: 0, textureMs: 0, textures: 0, renderMs: [0, 0], programs: 0,
+      }
+      for (const o of extra) scene.add(o)
+      // the composer's RenderPass draws into a HalfFloat target and the
+      // program cache key depends on the bound target (no tone mapping,
+      // linear output) — compiling against the canvas would build variants
+      // that never run. A 1×1 target of the same type stands in.
+      const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType })
+      const compile = async (): Promise<void> => {
+        renderer.setRenderTarget(rt)
+        let pending: Promise<unknown> | null = null
+        try {
+          if (opts.sync || typeof renderer.compileAsync !== 'function') {
+            renderer.compile(scene, rig.camera)
+          } else {
+            // compileAsync issues every compile synchronously and only the
+            // readiness polling is deferred — unbind the target before
+            // awaiting so a game frame in the meantime draws normally
+            pending = renderer.compileAsync(scene, rig.camera)
+          }
+        } finally {
+          renderer.setRenderTarget(null)
+        }
+        if (pending) await pending
+      }
+      try {
+        let t = performance.now()
+        await compile()
+        report.compileMs = performance.now() - t
+        opts.onPhase?.('compile')
+
+        // texture upload: every texture reachable from any material in the
+        // scene (canvas labels, table + beach maps) — first draw would
+        // otherwise upload them one frame at a time
+        t = performance.now()
+        const seen = new Set<THREE.Texture>()
+        scene.traverse((o) => {
+          const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined
+          if (!m) return
+          for (const mat of Array.isArray(m) ? m : [m]) {
+            for (const v of Object.values(mat) as unknown[]) {
+              const tex = v as THREE.Texture | null
+              if (tex && typeof tex === 'object' && tex.isTexture && !seen.has(tex)) {
+                seen.add(tex)
+                renderer.initTexture(tex)
+              }
+            }
+          }
+        })
+        report.textures = seen.size
+        report.textureMs = performance.now() - t
+        opts.onPhase?.('textures')
+
+        // real frames through the composer
+        if (opts.render !== false) {
+          t = performance.now()
+          post.render(0)
+          report.renderMs[0] = performance.now() - t
+          t = performance.now()
+          post.render(0)
+          report.renderMs[1] = performance.now() - t
+          opts.onPhase?.('render')
+        }
+      } finally {
+        for (const o of extra) scene.remove(o)
+        rt.dispose()
+      }
+      report.programs = renderer.info.programs?.length ?? 0
+      return report
+    },
     dispose() {
       post.dispose()
       env.dispose()
       beach.dispose()
+      shore.dispose()
+      scenery.dispose()
     },
   }
 }

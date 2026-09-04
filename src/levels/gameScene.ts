@@ -21,7 +21,7 @@ import { updateFeel } from '../physics/feel'
 import { SlingshotController } from '../physics/slingshot'
 import { tableFriction } from '../physics/materials'
 import { createStage } from '../render/stage'
-import { instantiateDrink } from '../drinks'
+import { instantiateDrink, buildAllDrinksAsync, createWarmupRig } from '../drinks'
 import { subscribe as subscribeAudio, resumeOnGesture, audio } from '../audio/engine'
 import { registerHarness, type HarnessApi } from '../harness/api'
 import { MergeSystem, mergeSurface } from '../merge/merge'
@@ -33,6 +33,7 @@ import { createDressing, type Dressing } from './dressing'
 import { loadSave, persistSave, wipeSave, recordLevelStars, recordEndlessScore, totalStars } from './save'
 import { createHud } from '../ui/hud'
 import { createMenus } from '../ui/menus'
+import { createLoadingOverlay } from '../ui/loading'
 
 /**
  * The playable game scene — the full docs/GAME.md game: 24 levels + endless
@@ -125,6 +126,12 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   const save = loadSave()
   setLocale(save.locale)
   audio.setMuted(save.muted)
+
+  // loading overlay (not in harness mode): shown BEFORE the synchronous
+  // stage build (beach textures, PMREM) and the warm-up below; two frames so
+  // it has painted before the main thread blocks
+  const loading = ctx.harness ? null : createLoadingOverlay()
+  if (loading) await loading.shown()
 
   const baseSeed = seedFromUrl()
   const stage = createStage(ctx.renderer, { preset: 'golden' })
@@ -857,19 +864,108 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     })
   )
 
-  // ---- boot ----
+  // ---- boot warm-up (first-spawn hitch) ----
 
   const params = new URLSearchParams(window.location.search)
+
+  /**
+   * Everything a first spawn of any tier would otherwise pay for on the
+   * spot: template build (one tier per animation frame), shader precompile
+   * against the composer's target, texture upload, one hidden real frame
+   * with every tier + the aim visuals on the table (transmission + post
+   * targets, shadow-depth and clip-plane variants). Fade variants are the
+   * deferred warmupFade() below. Purely visual: no physics body, no drink id, no Rng draw — the level loaded
+   * just before is untouched. Harness mode SKIPS it by default: SwiftShader
+   * JIT-compiles every pipeline at first draw, so the hidden frame cost a
+   * capture 20–90 s for tiers it never draws (capture.mjs's 30 s ready
+   * timeout tripped). `&warmup=1` runs it synchronously (no yields, no async
+   * compile) in the harness; `__ready` still fires after it either way.
+   */
+  async function warmup(): Promise<void> {
+    const sync = ctx.harness
+    if (sync && params.get('warmup') !== '1') return
+    const nextFrame = (): Promise<void> =>
+      new Promise((r) => {
+        if (document.hidden) setTimeout(r, 16)
+        else requestAnimationFrame(() => r())
+      })
+    const STEPS = 12 + 3
+    let step = 0
+    const tick = (): void => loading?.setProgress(++step / STEPS)
+    const t0 = performance.now()
+    await buildAllDrinksAsync(tick, sync ? undefined : nextFrame)
+    const buildMs = performance.now() - t0
+    const rig = createWarmupRig()
+    sling.group.visible = true // aim line + stop ring programs
+    let report
+    try {
+      report = await stage.warmup([rig.group], { sync, onPhase: tick })
+    } finally {
+      sling.group.visible = false
+      rig.dispose()
+    }
+    const stats = { buildMs: Math.round(buildMs), ...report, totalMs: Math.round(performance.now() - t0) }
+    warmupStats = stats
+    if (import.meta.env.DEV) console.log('[clink] warm-up', JSON.stringify(stats))
+    // boot installs the resize listener only after this scene resolves — an
+    // orientation change during the warm-up would otherwise stick
+    const host = ctx.renderer.domElement.parentElement
+    if (host) {
+      const w = host.clientWidth, h = host.clientHeight
+      const cur = ctx.renderer.getSize(new THREE.Vector2())
+      if (w > 0 && h > 0 && (w !== cur.x || h !== cur.y)) {
+        ctx.renderer.setSize(w, h)
+        stage.onResize(w, h)
+      }
+    }
+  }
+
+  /**
+   * Deferred, off the loading bar: the transparent (corpse-fade) program
+   * variants, compiled in the background once the title is up — compile-only,
+   * cloned materials, nothing drawn. ~1.9 s of driver time on an M4 that the
+   * player would otherwise wait through before the first tap.
+   */
+  async function warmupFade(): Promise<void> {
+    const sync = ctx.harness
+    if (sync && params.get('warmup') !== '1') return
+    const t0 = performance.now()
+    const rig = createWarmupRig({ fade: true })
+    let report
+    try {
+      report = await stage.warmup([rig.group], { sync, render: false })
+    } finally {
+      rig.dispose()
+    }
+    if (warmupStats) {
+      warmupStats.fadeMs = Math.round(performance.now() - t0)
+      warmupStats.fadePrograms = report.programs
+    }
+    if (import.meta.env.DEV) console.log('[clink] warm-up fade variants', Math.round(performance.now() - t0), 'ms')
+  }
+
+  let warmupStats: (Record<string, unknown> & { fadeMs?: number; fadePrograms?: number }) | null = null
+  Object.defineProperty(window, '__warmupStats', { get: () => warmupStats, configurable: true })
+
+  // ---- boot ----
+
   const urlLevel = params.get('level')
   if (urlLevel !== null) {
     loadLevel(Number(urlLevel) || 0)
     menus.setPauseButtonVisible(!ctx.harness)
+    await warmup()
   } else if (ctx.harness) {
     loadLevel(0) // deterministic captures: straight into endless, no menus
+    await warmup()
   } else {
     loadLevel(resumeTarget())
+    await warmup()
     pauseIntoMenu('title')
   }
+  if (loading) void loading.finish()
+  // background: fade variants (awaited in the harness so __ready follows it)
+  if (ctx.harness) await warmupFade()
+  else void warmupFade()
 
   let lastDt = 1 / 60
 

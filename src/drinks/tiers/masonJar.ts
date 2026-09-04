@@ -16,14 +16,21 @@ import {
 } from '../lib/extra-g69'
 
 /**
- * Tier 6 — mason-jar lemonade. Classic canning-jar silhouette: straight
+ * Tier 6 — mason-jar LIMEADE. Classic canning-jar silhouette: straight
  * barrel, fast shoulder, wide threaded neck, matte steel screw BAND riding
  * the threads LOW on the neck (the lowest ridge peeks below its skirt), a
  * full centimetre of naked glass rim standing proud ABOVE the band — the jar
  * is unmistakably OPEN: lemonade fills to the SHOULDER, so the surface + ice
  * read through the shoulder glass from game angles (a neck-high fill hid
  * both behind the band — critic). Pressed-glass C mug ear on +X,
- * cloudy pale lemonade, 3 mostly-submerged ice lumps, lemon wheel on the rim.
+ * cloudy saturated lime-green limeade, 3 mostly-submerged ice lumps, LIME
+ * wheel on the rim, green/white straw.
+ *
+ * Why limeade: pale-yellow lemonade in clear glass collapsed into the tier-5
+ * OJ highball at game distance ("two transparent containers with similar
+ * juice"). Green is ~80° of hue from orange and reads through the wall even
+ * at 40 px; the lime wheel + green straw repeat the cue above the rim where
+ * the band would otherwise hide it.
  *
  * Band truth: skirt bottom at y .1368 overlaps the thread zone (.133–.146) —
  * screwed ON, not hovering; the rolled top curls in at .157 and the glass
@@ -86,19 +93,20 @@ export function buildMasonJar(): DrinkVisual {
   glassMesh.castShadow = false // transmission-lit; the liquid casts instead
   glassMesh.receiveShadow = false
 
-  // ---- lemonade: cloudy PALE yellow on the lib depth-ramp recipe ----------
-  // The old deep-gold 0xe4ad1c + roughness 0.22 read as opaque custard. Pale
-  // high-value base (the ramp still drops the floor to an olive-dark deep, so
-  // light visibly penetrates), moderate roughness for cloud — the lib's
-  // hue-locked sheen + clearcoat keep it wet rather than chalky.
+  // ---- limeade: cloudy saturated lime on the lib depth-ramp recipe --------
+  // Authored at hue ~114° (green, not chartreuse): the recipe's +7° shift and
+  // the warm key's pull toward yellow (measured: 102° authored rendered 87°
+  // at the game camera) land the render near 95–100°. Mid
+  // value so it stays a GREEN body against the amber plank rather than a
+  // bright yellow-green wash; the ramp floor drops to bottle-green so depth
+  // still shows. Moderate roughness = the cloud of fresh-pressed limeade.
   const lemonade = buildLiquid(
     inner,
     FILL_Y,
     {
-      color: 0xe2c685, // authored at hue ~43° — the lib recipe's +7° hue
-      // shift lands it on sunny lemon ~50°, not chartreuse-olive
-      attenuationColor: 0x9c741c, // ramp floor: steeped-lemon olive, not mud
-      roughness: 0.15,
+      color: 0x4fc447,
+      attenuationColor: 0x1b5c1c, // ramp floor: bottle green, not olive mud
+      roughness: 0.16,
     },
     // overhang 8 mm: the fill line sits on the r ≈ .032 shoulder, so a 12°
     // tilted clip plane needs r·tan(12°) ≈ 7 mm of headroom
@@ -114,7 +122,7 @@ export function buildMasonJar(): DrinkVisual {
     freeboard: 0.28, // a touch prouder than the neck fill had: the lumps must
     // break the surface visibly through the shoulder glass
     seed: 66,
-    waterline: 0xbf9c4a, // lemonade surface tone, darkened — wet band at the line
+    waterline: 0x4a9a32, // limeade surface tone, darkened — wet band at the line
   })
 
   // ---- thread ridges: 3 clear-glass tori on the neck ----------------------
@@ -166,35 +174,50 @@ export function buildMasonJar(): DrinkVisual {
 
   // ---- C mug ear on +X: pressed glass -------------------------------------
   // Path bulges to x+tube = 0.048 exactly; both open ends buried in the wall.
-  const earMat = solidGlass({ thickness: 0.0072 })
+  // Tube fattened 3.6 → 4.2 mm (path pulled in to keep the footprint) and
+  // tinted a shade cooler/darker than the jar wall so the loop holds a
+  // visible edge against the sunlit plank at game distance — the old thin
+  // clear rod vanished into the background at 50 px.
+  const earMat = solidGlass({ thickness: 0.0084, tint: 0xc4e2d4, roughness: 0.12 })
   const ear = tubeHandle({
     points: [
       [0.0310, 0.1170, 0],
-      [0.0410, 0.1155, 0],
-      [0.0442, 0.1040, 0],
-      [0.0444, 0.0860, 0],
-      [0.0426, 0.0690, 0],
-      [0.0380, 0.0570, 0],
+      [0.0406, 0.1158, 0],
+      [0.0436, 0.1040, 0],
+      [0.0438, 0.0860, 0],
+      [0.0420, 0.0690, 0],
+      [0.0376, 0.0570, 0],
       [0.0305, 0.0525, 0],
     ],
-    tubeRadius: 0.0036,
+    tubeRadius: 0.0042,
     material: earMat,
   })
   ear.castShadow = false
   ear.receiveShadow = false
 
-  // ---- straw: teal candy stripe, elbow above the rim ----------------------
+  // ---- straw: green/white candy stripe, elbow above the rim ---------------
   const straw = bentStraw({
     radius: 0.0023,
     bottom: [0.013, 0.02, -0.006],
     bendStart: [0.002, 0.179, -0.016],
     tip: [0.015, 0.207, -0.028],
-    color: 0x1fb5a6,
+    color: 0x1e9e3a,
     stripe: 0xfffbe8,
   })
 
-  // ---- lemon wheel slotted over the naked rim on -X -----------------------
-  const wheel = citrusWheel({ radius: 0.021, thickness: 0.006, seed: 12 })
+  // ---- LIME wheel slotted over the naked rim on -X ------------------------
+  // Green rind, pale-green pulp: the garnish is the second green cue above
+  // the rim, where the steel band would otherwise hide the liquid colour.
+  const wheel = citrusWheel({
+    radius: 0.021,
+    thickness: 0.006,
+    seed: 12,
+    rind: '#2f8f1c',
+    pith: '#eef8d6',
+    pulp: '#c4ec7a',
+    pulpDeep: '#86cf3f',
+    vesicle: '#e6f8b4',
+  })
   wheel.rotation.set(Math.PI / 2, 0, 0.1) // face → ±Z, slight jaunty lean
   wheel.position.set(-0.0295, 0.1690, 0)
 

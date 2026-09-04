@@ -10,8 +10,13 @@ import { bentStraw } from '../lib/parts'
  * Tier 1 — paper juice box. Tetra-brick lofted from rounded-square cross
  * sections that pinch into a gable seam at the top (fin ridge + two folded
  * side ears), glossy bent straw rising through the sloped panel near a
- * corner. Label wraps the perimeter: warm orange body band (>= half height),
- * cream top, orange-slice roundel on the front.
+ * corner. Label wraps the perimeter: deep GRAPE-purple body band (>= half
+ * height), cream top, grape-bunch roundel on the front.
+ *
+ * Why grape: at game distance (40–60 px) the old warm-orange band collapsed
+ * into the tier-3 cola can's red — the two most common table neighbours
+ * read as one colour. Purple sits ~80° of hue away from cola red AND a full
+ * value step darker, so the pair separates on hue OR value alone.
  *
  * All dimensions in metres. R = 0.026, H = 0.105 (config/tiers.ts) — the
  * 0.037 x 0.037 square footprint's half-diagonal is 0.0262 ~= R.
@@ -133,6 +138,56 @@ function bottomCap(hx: number, hz: number, cr: number): THREE.BufferGeometry {
   return geo
 }
 
+/**
+ * Grape-bunch motif: a 3-2-1 pyramid of berries with a specular dot each,
+ * a leaf + stem above. Sized for the 112 px roundel; at game distance it
+ * reads as a purple blob on cream — which is the point.
+ */
+function paintGrapes(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number): void {
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.scale(scale, scale)
+  // stem + leaf first so berries overlap them
+  ctx.strokeStyle = '#6b4a2b'
+  ctx.lineWidth = 3
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(0, -18)
+  ctx.lineTo(3, -36)
+  ctx.stroke()
+  ctx.fillStyle = '#5cbf3a'
+  ctx.beginPath()
+  ctx.ellipse(13, -30, 15, 7.5, -0.45, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#3f8f27'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(1, -25)
+  ctx.lineTo(25, -36)
+  ctx.stroke()
+  const rows: ReadonlyArray<readonly [number, number[]]> = [
+    [-10, [-18, 0, 18]],
+    [6, [-9, 9]],
+    [22, [0]],
+  ]
+  for (const [y, xs] of rows) {
+    for (const x of xs) {
+      ctx.fillStyle = '#7b3fc4'
+      ctx.strokeStyle = '#3b1470'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(x, y, 9.5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#c9a8f0'
+      ctx.beginPath()
+      ctx.arc(x - 3, y - 3.5, 2.6, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  ctx.restore()
+}
+
 /** Pin every UV of a geometry to one texel — flat-color parts share the label. */
 function pinUVs(geo: THREE.BufferGeometry, uu: number, vv: number): void {
   const uv = geo.getAttribute('uv') as THREE.BufferAttribute
@@ -171,48 +226,32 @@ export function buildJuiceBox(): DrinkVisual {
     (ctx, w, h) => {
       // one face panel is only 1/4 of the canvas width (128 px) — every
       // front element must fit inside x 192..320 or it wraps the corner
-      const cream = '#f8ecd9'
-      const orange = '#e25a03' // darkened so the bright warm key can't wash it to peach
-      const deep = '#a64802'
-      const pale = '#ffcf92'
+      const cream = '#f7efe2'
+      // deep grape: authored dark AND saturated — the golden-hour key pushes
+      // purples toward warm mauve and AgX drains chroma, so the band must
+      // start well into violet to still render as unmistakable purple
+      const grape = '#46178f'
+      const deep = '#250a52'
+      const pale = '#d9c4f5'
       ctx.fillStyle = cream
       ctx.fillRect(0, 0, w, h)
-      // warm orange body band (62% of height) + dark grounding strip
-      ctx.fillStyle = orange
+      // grape body band (62% of height) + darker grounding strip
+      ctx.fillStyle = grape
       ctx.fillRect(0, 0.38 * h, w, 0.62 * h)
       ctx.fillStyle = deep
       ctx.fillRect(0, 0.955 * h, w, 0.045 * h)
       // playful wavy print edge (seamless: 64 | 512)
       paintWave(ctx, w, 0.38 * h, 6, 64, cream, 10)
 
-      // FRONT (u 0.5): orange-slice roundel, sized to the panel
+      // FRONT (u 0.5): grape-bunch roundel, sized to the panel
       const rx = w / 2
       const ry = 0.42 * h
-      paintRoundel(ctx, rx, ry, 56, { fill: '#fff4e2', ring: deep, ringWidth: 0.11 })
-      ctx.fillStyle = '#ffa42a'
-      ctx.beginPath()
-      ctx.arc(rx, ry, 37, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.strokeStyle = '#fff4e2'
-      ctx.lineWidth = 4
-      ctx.beginPath()
-      ctx.arc(rx, ry, 37, 0, Math.PI * 2)
-      ctx.stroke()
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2
-        ctx.beginPath()
-        ctx.moveTo(rx + Math.cos(a) * 6, ry + Math.sin(a) * 6)
-        ctx.lineTo(rx + Math.cos(a) * 32, ry + Math.sin(a) * 32)
-        ctx.stroke()
-      }
-      ctx.fillStyle = '#fff4e2'
-      ctx.beginPath()
-      ctx.arc(rx, ry, 4, 0, Math.PI * 2)
-      ctx.fill()
+      paintRoundel(ctx, rx, ry, 56, { fill: '#f9f3ff', ring: deep, ringWidth: 0.11 })
+      paintGrapes(ctx, rx, ry + 5, 1)
 
-      paintText(ctx, 'JU!CY', rx, 0.63 * h, 36, { color: '#fff6e8', weight: 900 })
+      paintText(ctx, 'GRAPE', rx, 0.63 * h, 34, { color: '#f9f3ff', weight: 900 })
       paintText(ctx, '200 ml', rx, 0.705 * h, 14, { color: pale, weight: 600 })
-      paintText(ctx, 'SQUEEZE ME', rx, 0.3 * h, 16, { color: orange, weight: 800 })
+      paintText(ctx, 'SQUEEZE ME', rx, 0.3 * h, 16, { color: grape, weight: 800 })
 
       // SIDES (u 0.25 / 0.75): star burst + vitamin note
       for (const sx of [0.25 * w, 0.75 * w]) {
@@ -221,7 +260,8 @@ export function buildJuiceBox(): DrinkVisual {
       }
       // BACK (seam at u 0/1): split roundel + maker line drawn twice
       for (const bx of [0, w]) {
-        paintRoundel(ctx, bx, 0.42 * h, 42, { fill: '#fff4e2', ring: deep, ringWidth: 0.12, inner: '#ffa42a' })
+        paintRoundel(ctx, bx, 0.42 * h, 42, { fill: '#f9f3ff', ring: deep, ringWidth: 0.12 })
+        paintGrapes(ctx, bx, 0.42 * h + 4, 0.75)
         paintText(ctx, 'SUN JUICE CO.', bx, 0.6 * h, 15, { color: '#fff6e8', weight: 700 })
       }
     },
@@ -273,7 +313,7 @@ export function buildJuiceBox(): DrinkVisual {
     bendStart: [0.0154, 0.1125, 0.0054],
     tip: [0.0235, 0.1235, 0.008],
     color: 0xffffff,
-    stripe: 0xf07301,
+    stripe: 0x6a2fbf,
   })
 
   const template = new THREE.Group()

@@ -62,6 +62,10 @@ export interface WarmupOptions {
   /** default true; false = precompile + texture upload only, no frames */
   render?: boolean
   onPhase?: (phase: WarmupPhase) => void
+  /** compile only the `extra` objects (against the scene's lights/env) —
+   *  the deferred fade pass uses this so a level load mid-compile can't hand
+   *  compileAsync a disposed material */
+  onlyExtra?: boolean
 }
 
 export interface WarmupReport {
@@ -203,13 +207,14 @@ export function createStage(renderer: THREE.WebGLRenderer, opts: StageOptions = 
         renderer.setRenderTarget(rt)
         let pending: Promise<unknown> | null = null
         try {
+          const targets: THREE.Object3D[] = opts.onlyExtra ? extra : [scene]
           if (opts.sync || typeof renderer.compileAsync !== 'function') {
-            renderer.compile(scene, rig.camera)
+            for (const o of targets) renderer.compile(o, rig.camera, scene)
           } else {
             // compileAsync issues every compile synchronously and only the
             // readiness polling is deferred — unbind the target before
             // awaiting so a game frame in the meantime draws normally
-            pending = renderer.compileAsync(scene, rig.camera)
+            pending = Promise.all(targets.map((o) => renderer.compileAsync(o, rig.camera, scene)))
           }
         } finally {
           renderer.setRenderTarget(null)

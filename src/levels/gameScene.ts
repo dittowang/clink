@@ -17,9 +17,25 @@ import { createStage } from '../render/stage'
 import { instantiateDrink, buildAllDrinksAsync, createWarmupRig } from '../drinks'
 import { subscribe as subscribeAudio, resumeOnGesture, audio } from '../audio/engine'
 import { registerHarness, type HarnessApi } from '../harness/api'
-import { MergeSystem, mergeSurface } from '../merge/merge'
+import { MergeSystem, mergeSurface, mergeScore } from '../merge/merge'
 import { TurnManager } from './turns'
 import { SpawnDirector } from './director'
+import { OrderManager } from './orders'
+import {
+  SERVE_LIFT_M,
+  SERVE_LIFT_S,
+  SERVE_GLIDE_S,
+  SERVE_SHRINK_TO,
+  SERVE_SIDE_MARGIN_M,
+  SERVE_SCORE_MULT,
+  NEXT_ORDER_DELAY_S,
+  MISS_FLASH_S,
+  JUNK_DROP_M,
+  JUNK_Z_INSET_M,
+  ORDER_SEED_SALT,
+} from '../config/orders'
+import { createThumbnailer } from '../render/thumbnails'
+import RAPIER from '@dimforge/rapier3d-compat'
 import { SandPuff } from './sandPuff'
 import { WindField, WindDrift } from './wind'
 import { createDressing, type Dressing } from './dressing'
@@ -172,6 +188,16 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   const seqEndQuat = new THREE.Quaternion()
   let pendingEndMenu: (() => void) | null = null
 
+  // ---- orders (Endless pacing; src/levels/orders.ts + src/config/orders.ts) ----
+  let orders: OrderManager | null = null
+  /** the drink being carried off the service side */
+  let serveJob: { drink: Drink; t: number; x0: number; y0: number; z0: number; toX: number } | null = null
+  /** world.time at which the next card is issued (after a serve / a miss) */
+  let nextOrderAt = Infinity
+  /** the tossed junk: thud when it lands */
+  let junkWatch: { drink: Drink; landed: boolean } | null = null
+  const thumbs = createThumbnailer(ctx.renderer, stage.scene, stage.sun)
+
   /** aim the end-sequence pose: camera at `pos`, looking at (tx, ty, tz) */
   function setSeqEndPose(px: number, py: number, pz: number, tx: number, ty: number, tz: number): void {
     seqEndPos.set(px, py, pz)
@@ -288,6 +314,13 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       if (d.state !== 'dead') remove(d)
     }
     cradle = null
+    orders = null
+    serveJob = null
+    junkWatch = null
+    nextOrderAt = Infinity
+    director?.setOrderBias(null)
+    hud.setOrder(null)
+    hud.setServed(null)
     if (trayDrink) {
       trayGroup.remove(trayDrink)
       for (const m of trayLiquidMats) m.dispose()
@@ -378,6 +411,15 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     refreshTray()
     spawnCradle()
     log('levelLoad', { level: def.id })
+
+    // Endless: the order ladder starts with the first card on the table.
+    // Its Rng is a separate stream (salted) from the spawn director's.
+    audio.setBarBusy(0)
+    if (def.goal.kind === 'endless') {
+      orders = new OrderManager(levelSeed(baseSeed, def.id) ^ ORDER_SEED_SALT, def.pool, tierOnTable)
+      hud.setServed(0)
+      issueOrder()
+    }
   }
 
   // ---- outcomes ----
@@ -460,12 +502,178 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     // the panel waits for the camera rise — a full-opacity overlay one frame
     // after play was the "hard cut" a smooth rise cannot hide
     if (def.goal.kind === 'endless') {
-      const rank = recordEndlessScore(save, score)
+      const served = orders?.served ?? 0
+      const rank = recordEndlessScore(save, score, served)
       persistSave(save)
-      pendingEndMenu = () => menus.showEndlessGameOver(score, rank)
+      pendingEndMenu = () => menus.showEndlessGameOver(score, rank, served)
     } else {
       pendingEndMenu = () => menus.showFoulGameOver(score)
     }
+  }
+
+  // ---- orders ----
+
+  /** copies of a tier the player can see standing on the table */
+  function tierOnTable(tier: TierId): number {
+    let n = 0
+    for (const d of world.all) {
+      if (d.tier !== tier) continue
+      if (d.state === 'live' || d.state === 'merging' || d.state === 'cradle') n++
+    }
+    return n
+  }
+
+  function issueOrder(): void {
+    if (!orders || outcome !== 'playing') return
+    const o = orders.issue()
+    director.setOrderBias(o.tier)
+    hud.setOrder({ tier: o.tier, thumb: thumbs.get(o.tier), budget: o.budget, remaining: o.budget })
+    bus.emit('orderNew', { tier: o.tier, budget: o.budget })
+    log('orderNew', { tier: o.tier, budget: o.budget, served: orders.served })
+  }
+
+  /**
+   * SERVE: the ordered drink goes kinematic (collider off), lifts with a
+   * small ease-out-back and glides off the LEFT edge (the service side; the
+   * tray sits on the right stool) while shrinking, then is removed. Score
+   * = mergeScore(T, 1) × 3 × tip; the next card comes NEXT_ORDER_DELAY_S
+   * after the glide ends.
+   */
+  function startServe(d: Drink): void {
+    if (!orders || !orders.current) return
+    const r = orders.serve()
+    d.state = 'serving'
+    d.collider.setEnabled(false)
+    d.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true)
+    serveJob = {
+      drink: d,
+      t: 0,
+      x0: d.currPos.x,
+      y0: d.currPos.y,
+      z0: d.currPos.z,
+      toX: -world.halfW - SERVE_SIDE_MARGIN_M,
+    }
+    const gained = Math.round(mergeScore(r.tier, 1) * SERVE_SCORE_MULT * r.tip)
+    score += gained
+    hud.setScore(score)
+    hud.setOrderDone()
+    hud.setServed(r.served)
+    const at = _tmp.set(d.currPos.x, world.surfaceYAt(d.currPos.z) + d.def.height + 0.03, d.currPos.z).clone()
+    hud.pop(`+${gained} · ${t('served')}`, at, stage.camera, {
+      gold: true,
+      sub: r.tip > 1 ? t('tip', { n: r.tip.toFixed(1) }) : undefined,
+    })
+    bus.emit('scoreChange', { score, delta: gained, worldPos: at })
+    bus.emit('orderServed', { tier: r.tier, score: gained, tip: r.tip, served: r.served })
+    log('orderServed', { id: d.id, tier: r.tier, score: gained, tip: round3(r.tip), served: r.served, total: score })
+    director.setOrderBias(null)
+    audio.setBarBusy(orders.busy())
+    if (r.shifted) {
+      director.setPool(orders.pool())
+      hud.toast(t('barHeatingUp'))
+      log('poolShift', { shift: orders.poolShift, pool: orders.pool() })
+    }
+  }
+
+  function easeOutBack(k: number): number {
+    const c1 = 1.70158
+    const u = k - 1
+    return 1 + (c1 + 1) * u * u * u + c1 * u * u
+  }
+
+  function updateServe(dt: number): void {
+    const job = serveJob
+    if (!job) return
+    job.t += dt
+    const d = job.drink
+    const k = Math.min(1, job.t / SERVE_GLIDE_S)
+    const e = k * k * (3 - 2 * k) // smoothstep glide: eases out of rest, into the hand-off
+    const lift = SERVE_LIFT_M * easeOutBack(Math.min(1, job.t / SERVE_LIFT_S))
+    _tmp.set(job.x0 + (job.toX - job.x0) * e, job.y0 + lift, job.z0)
+    d.body.setNextKinematicTranslation(_tmp)
+    d.visual.scale.setScalar(1 - (1 - SERVE_SHRINK_TO) * e)
+    if (k >= 1) {
+      serveJob = null
+      remove(d)
+      nextOrderAt = world.time + NEXT_ORDER_DELAY_S
+    }
+  }
+
+  /**
+   * MISS: the budget is spent, the last launch has resolved (turn phase left
+   * 'wait', no merge in flight, no live T still rolling) and T never
+   * appeared — the customer leaves and ONE junk drink is tossed just beyond
+   * the foul line on the safe side. The ladder position is unchanged.
+   */
+  function doMiss(): void {
+    if (!orders || !orders.current) return
+    const r = orders.miss()
+    director.setOrderBias(null)
+    hud.flashOrderMissed(t('customerLeft'))
+    tossJunk()
+    bus.emit('orderMissed', { tier: r.tier, missed: r.missed })
+    log('orderMissed', { tier: r.tier, missed: r.missed })
+    nextOrderAt = world.time + MISS_FLASH_S
+  }
+
+  function tossJunk(): void {
+    if (!orders) return
+    const j = orders.junkToss()
+    const r = TIERS[j.tier].radius
+    const z = FOUL_Z - JUNK_Z_INSET_M
+    // seeded x first; sidestep deterministically if something stands there
+    let x = j.x
+    let placed = cradleSpotFree(x, z, r)
+    for (let i = 1; !placed && i <= 8; i++) {
+      for (const sgn of [1, -1]) {
+        const cx = j.x + sgn * i * 0.05
+        if (Math.abs(cx) > world.halfW - r - 0.01) continue
+        if (cradleSpotFree(cx, z, r)) {
+          x = cx
+          placed = true
+          break
+        }
+      }
+    }
+    const d = world.spawnDrink(j.tier, x, z, { dropHeight: JUNK_DROP_M, state: 'live' })
+    d.body.setLinvel({ x: j.vx, y: 0, z: j.vz }, true)
+    attach(d)
+    junkWatch = { drink: d, landed: false }
+    log('junkToss', { id: d.id, tier: j.tier, x: round3(x), z: round3(z), vx: round3(j.vx), vz: round3(j.vz) })
+  }
+
+  /** fixed-step order logic (Endless, while playing) */
+  function updateOrders(dt: number): void {
+    if (!orders) return
+    updateServe(dt)
+    if (junkWatch) {
+      const d = junkWatch.drink
+      if (d.state === 'dead') junkWatch = null
+      else if (!junkWatch.landed && d.currPos.y <= world.surfaceYAt(d.currPos.z) + d.def.height / 2 + 0.004) {
+        junkWatch.landed = true
+        bus.emit('spawnDrop', { id: d.id, tier: d.tier }) // the dull thud
+        log('junkLanded', { id: d.id, x: round3(d.currPos.x), z: round3(d.currPos.z) })
+        junkWatch = null
+      }
+    }
+    if (world.time >= nextOrderAt) {
+      nextOrderAt = Infinity
+      issueOrder()
+    }
+    const o = orders.current
+    if (!o || serveJob) return
+    // fulfilment: a drink of tier T at rest on the table (a merge's grow ends
+    // in 'live' at rest; a straight spawn of T that settles counts too)
+    let liveT = 0
+    for (const d of world.all) {
+      if (d.tier !== o.tier || d.state !== 'live') continue
+      liveT++
+      if (d.speed < SETTLE_SPEED && d.currPos.z < NEAR_Z) {
+        startServe(d)
+        return
+      }
+    }
+    if (orders.budgetExhausted && turn.phase !== 'wait' && !merge.busy && liveT === 0) doMiss()
   }
 
   // ---- turn loop ----
@@ -833,6 +1041,10 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       cradle = null
       refreshTray()
       usedPushes++
+      if (orders?.current) {
+        orders.onLaunch()
+        hud.setOrderRemaining(orders.pushesLeft)
+      }
       if (pushesLeft !== null) {
         pushesLeft = Math.max(0, pushesLeft - 1)
         hud.setPushes(pushesLeft)
@@ -894,7 +1106,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
         if (document.hidden) setTimeout(r, 16)
         else requestAnimationFrame(() => r())
       })
-    const STEPS = 12 + 3
+    const STEPS = 12 + 3 + 1
     let step = 0
     const tick = (): void => loading?.setProgress(++step / STEPS)
     const t0 = performance.now()
@@ -909,7 +1121,17 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       sling.group.visible = false
       rig.dispose()
     }
-    const stats = { buildMs: Math.round(buildMs), ...report, totalMs: Math.round(performance.now() - t0) }
+    // order-card thumbnails: same scene/programs as the frames above, so this
+    // is 12 small draws + readbacks, no extra compiles
+    const tThumb = performance.now()
+    thumbs.prerender()
+    tick()
+    const stats = {
+      buildMs: Math.round(buildMs),
+      ...report,
+      thumbMs: Math.round(performance.now() - tThumb),
+      totalMs: Math.round(performance.now() - t0),
+    }
     warmupStats = stats
     if (import.meta.env.DEV) console.log('[clink] warm-up', JSON.stringify(stats))
     // boot installs the resize listener only after this scene resolves — an
@@ -938,7 +1160,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     const rig = createWarmupRig({ fade: true })
     let report
     try {
-      report = await stage.warmup([rig.group], { sync, render: false })
+      report = await stage.warmup([rig.group], { sync, render: false, onlyExtra: true })
     } finally {
       rig.dispose()
     }
@@ -992,6 +1214,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
             }
           }
         }
+
+        updateOrders(dt)
 
         // goal met → completion beat (waits out the merge animations);
         // no new turns spawn while the beat runs
@@ -1087,6 +1311,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       sling.dispose()
       hud.dispose()
       puff.dispose()
+      thumbs.dispose()
       stage.dispose()
     },
   }
@@ -1139,6 +1364,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
         }
       })(),
       wind: windField ? round3(windField.strength01 * windField.amp) : 0,
+      order: api.order(),
       drinks: world.all.map((d) => ({
         id: d.id,
         tier: d.tier,
@@ -1159,7 +1385,21 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       wipeSave()
       save.stars = {}
       save.endless = []
+      save.endlessOrders = []
     },
+    /** Endless orders: the active card + run tallies (null outside Endless) */
+    order: () =>
+      orders
+        ? {
+            tier: orders.current ? orders.current.tier : null,
+            budget: orders.current ? orders.current.budget : 0,
+            pushesUsed: orders.current ? orders.current.used : 0,
+            served: orders.served,
+            missed: orders.missed,
+            poolShift: orders.poolShift,
+            pool: orders.pool(),
+          }
+        : null,
     // extras beyond HarnessApi, reachable from --eval:
     /** launch an arbitrary spawned drink (merge tests need a same-tier pusher) */
     shove: (id: number, angle: number, power: number): void => {

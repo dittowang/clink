@@ -61,6 +61,17 @@ Ch.4 Night — wind, missing rails, pre-placed tangles:
 - L24 pool [7,8,9,10]   makeTier 12, 60, wind 0.5
 
 Endless: golden preset, pool [1..5], no push limit, local top-5 leaderboard.
+Paced by ORDERS (src/config/orders.ts has every number): one card at a time,
+"serve one drink of tier T". First order T3; the ladder climbs one tier per
+2 served (cap min(12, poolMax+2); bumped +1 while T already stands on the
+table). Budget = 5 + 2(T−2) launches (+40 % when no T−1 is on the table);
+the miss resolves when the last launch has settled. Serve: the drink lifts
+and glides off the left (service) side; score = mergeScore(T,1) × 3 × tip,
+tip = 1 + 0.1 × pushes left (≤ 2.0). Miss: "customer left", one seeded junk
+drink (tier 1–2) is tossed 12 cm inside the foul line. Every 3 served the
+pool shifts up a tier ([1..5] → … → [4..8]) with a toast, and the bar
+ambience gets busier (murmur + clinks up to 1.8×). Run Over shows orders
+served; the local top-5 keeps a parallel served count.
 
 Stars: 1★ = goal met; 2★/3★ = score thresholds (tune per level ≈ 1.6× and
 2.6× of a just-passing run). 10★ total unlocks the next chapter.
@@ -85,12 +96,15 @@ sand thud + dust puff, points forfeited, drink dies into the sand.
 
 ## HUD
 
-Score top-left, pushes top-right, objective chip bottom-left, next drink
-in-world on a tray beside the cradle. HTML overlay only for menus and score
+Score top-left (Endless: "Served N" under it), pushes top-right, the Endless
+order card top-centre (56 px drink thumbnail, tier name, budget pips — a bar
+above 12 — pulsing at ≤ 2 left; green tick on serve, red shake on a miss),
+objective chip bottom-left, next drink in-world on a tray beside the cradle. HTML overlay only for menus and score
 pops (positioned via Vector3.project). System font stack. All strings via
 `t()` from src/core/strings.ts.
 
 ## Persistence
 
 localStorage `clink.save.v1`: { stars: Record<levelId, 0-3>, endless: number[],
-locale, muted }. Never store anything else.
+endlessOrders: number[] (orders served per top-5 run, parallel to `endless`;
+missing in old saves → zeros), locale, muted }. Never store anything else.

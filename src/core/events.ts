@@ -29,6 +29,13 @@ export interface GameEvents {
   levelComplete: { stars: number; score: number }
   gameOver: { score: number; reason: 'foul' }
   muteChange: { muted: boolean }
+  // ---- orders (Endless pacing, src/levels/orders.ts) ----
+  /** a new order card: serve one drink of `tier` within `budget` launches */
+  orderNew: { tier: TierId; budget: number }
+  /** the ordered drink appeared at rest and is being carried off */
+  orderServed: { tier: TierId; score: number; tip: number; served: number }
+  /** budget spent without a serve: customer left, junk tossed */
+  orderMissed: { tier: TierId; missed: number }
 }
 
 type Handler<T> = (payload: T) => void

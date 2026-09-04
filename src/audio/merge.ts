@@ -1,5 +1,6 @@
-import { noiseBurst, panForX, partial, vary, whiteNoiseBuffer, type SourceSink } from './dsp'
+import { clamp01, noiseBurst, panForX, partial, vary, whiteNoiseBuffer, type SourceSink } from './dsp'
 import { audio } from './engine'
+import { TIP_CAP } from '../config/orders'
 
 /**
  * Merge + one-shot UI/game sounds. `scheduleMerge` is the shared recipe core
@@ -171,4 +172,36 @@ export function playGameOver(): void {
     const last = i === notes.length - 1
     partial(h.ctx, lp, sink, t0, { freq: notes[i], amp: 0.17, decay: last ? 0.9 : 0.4, type: 'triangle', attack: 0.008 })
   }
+}
+
+/**
+ * "Order up": two clean sines a fifth apart (C6 → G6), 60 ms apart, 300 ms
+ * decay, plus a soft coin/tip tick whose level scales with the tip (silent
+ * at tip 1, a bright little ting at TIP_CAP). Shared core so offline.ts can
+ * verify it. Returns total duration (s).
+ */
+export function scheduleOrderUp(ctx: BaseAudioContext, dest: AudioNode, t0: number, tip: number): number {
+  const sink: SourceSink = { srcs: [] }
+  partial(ctx, dest, sink, t0, { freq: 1046.5, amp: 0.16, decay: 0.3, attack: 0.002 })
+  partial(ctx, dest, sink, t0 + 0.06, { freq: 1568.0, amp: 0.14, decay: 0.3, attack: 0.002 })
+  const k = clamp01((tip - 1) / (TIP_CAP - 1))
+  let end = t0 + 0.36
+  if (k > 0) {
+    const at = t0 + 0.17
+    partial(ctx, dest, sink, at, { freq: 2637 * vary(1, 0.01), amp: 0.025 + 0.075 * k, decay: 0.14, attack: 0.001 })
+    partial(ctx, dest, sink, at, { freq: 5274, amp: 0.012 + 0.03 * k, decay: 0.07, attack: 0.001 })
+    noiseBurst(ctx, dest, sink, at, { dur: 0.03, amp: 0.015 + 0.03 * k, type: 'bandpass', freq: 5200, q: 3 })
+    end = at + 0.16
+  }
+  return end - t0
+}
+
+/** the serve bell, from the service side (left) of the stereo field */
+export function playOrderUp(tip: number): void {
+  const h = audio.playbackHandle()
+  if (!h) return
+  const panner = h.ctx.createStereoPanner()
+  panner.pan.value = panForX(-0.3)
+  panner.connect(h.fx)
+  scheduleOrderUp(h.ctx, panner, h.now + 0.01, tip)
 }

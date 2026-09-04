@@ -2,6 +2,7 @@ import type { TierId } from '../config/tiers'
 import { SETTLE_SPEED } from '../config/table'
 import { Rng } from '../core/rng'
 import type { PhysicsWorld } from '../physics/world'
+import { ORDER_BIAS_T_MINUS_1, ORDER_BIAS_T_MINUS_2 } from '../config/orders'
 
 /**
  * SpawnDirector — the weighted draw stream, per docs/GAME.md.
@@ -12,19 +13,40 @@ import type { PhysicsWorld } from '../physics/world'
  *     push it toward the ×1.4 cap) — feed an almost-ready merge;
  *   - a tier with 0 copies that is not the pool's lowest gets ×0.7 — don't
  *     seed a tier the player has no partners for.
+ * Order bias (Endless, src/config/orders.ts): while an order for T is active
+ * the ingredients get a nudge — tier T−1 ×1.6, tier T−2 ×1.25 — multiplied
+ * on top of the rubber band, pool tiers only. Fair without feeling rigged.
  * Draws consume exactly one rng.next() each, so runs stay reproducible from
  * the seeded stream (same seed + same pushes → same draws).
  */
 export class SpawnDirector {
   // scratch, reused per draw
-  private readonly weights: number[]
+  private weights: number[]
+  private pool_: readonly TierId[]
+  private orderTier: TierId | null = null
 
   constructor(
     private readonly rng: Rng,
-    readonly pool: readonly TierId[],
+    pool: readonly TierId[],
     private readonly world: PhysicsWorld
   ) {
+    this.pool_ = pool
     this.weights = new Array(pool.length).fill(0)
+  }
+
+  get pool(): readonly TierId[] {
+    return this.pool_
+  }
+
+  /** Endless pool progression: swap the pool in place (the stream continues) */
+  setPool(pool: readonly TierId[]): void {
+    this.pool_ = pool
+    this.weights = new Array(pool.length).fill(0)
+  }
+
+  /** active order target (null = no bias) */
+  setOrderBias(tier: TierId | null): void {
+    this.orderTier = tier
   }
 
   /** copies of a tier at rest on the table (live + below settle speed) */
@@ -45,6 +67,10 @@ export class SpawnDirector {
         w *= Math.min(1 + 0.15 * copies, 1.4) // 2 copies → ×1.3, 3+ → ×1.4 cap
       } else if (copies === 0 && i > 0) {
         w *= 0.7
+      }
+      if (this.orderTier !== null) {
+        if (this.pool[i] === this.orderTier - 1) w *= ORDER_BIAS_T_MINUS_1
+        else if (this.pool[i] === this.orderTier - 2) w *= ORDER_BIAS_T_MINUS_2
       }
       this.weights[i] = w
     }

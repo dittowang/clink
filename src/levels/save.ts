@@ -2,7 +2,8 @@ import { type Locale, detectLocale } from '../core/strings'
 
 /**
  * Persistence — localStorage `clink.save.v1`, exactly the shape docs/GAME.md
- * allows and NOTHING else: { stars, endless top-5, locale, muted }.
+ * allows and NOTHING else: { stars, endless top-5 (+ parallel orders-served
+ * counts), locale, muted }.
  * Loaded once at boot; persisted on level end and on settings change.
  */
 
@@ -13,12 +14,14 @@ export interface SaveData {
   stars: Record<number, number>
   /** endless top-5 scores, descending */
   endless: number[]
+  /** orders served in each top-5 run, parallel to `endless` (old saves → 0) */
+  endlessOrders: number[]
   locale: Locale
   muted: boolean
 }
 
 function fresh(): SaveData {
-  return { stars: {}, endless: [], locale: detectLocale(), muted: false }
+  return { stars: {}, endless: [], endlessOrders: [], locale: detectLocale(), muted: false }
 }
 
 export function loadSave(): SaveData {
@@ -39,6 +42,12 @@ export function loadSave(): SaveData {
         .filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
         .slice(0, 5)
     }
+    // parallel served counts; a pre-orders save has none → zeros
+    const orders = Array.isArray(p.endlessOrders) ? p.endlessOrders : []
+    out.endlessOrders = out.endless.map((_, i) => {
+      const n = orders[i]
+      return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+    })
     if (p.locale === 'en' || p.locale === 'zh-CN') out.locale = p.locale
     if (typeof p.muted === 'boolean') out.muted = p.muted
     return out
@@ -81,10 +90,14 @@ export function recordLevelStars(save: SaveData, levelId: number, stars: number)
  * Insert an endless score into the local top-5. Returns the 0-based rank the
  * score landed at, or null if it didn't chart.
  */
-export function recordEndlessScore(save: SaveData, score: number): number | null {
+export function recordEndlessScore(save: SaveData, score: number, served = 0): number | null {
   if (score <= 0) return null // a merge-less run doesn't chart on Local Best
-  const list = [...save.endless, score].sort((a, b) => b - a).slice(0, 5)
-  save.endless = list
-  const rank = list.indexOf(score)
+  const rows = save.endless.map((s, i) => ({ s, o: save.endlessOrders[i] ?? 0 }))
+  const entry = { s: score, o: served }
+  // stable sort by score: an equal score charts BELOW the older run
+  const list = [...rows, entry].sort((a, b) => b.s - a.s).slice(0, 5)
+  save.endless = list.map((r) => r.s)
+  save.endlessOrders = list.map((r) => r.o)
+  const rank = list.indexOf(entry)
   return rank >= 0 ? rank : null
 }

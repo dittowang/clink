@@ -7,6 +7,7 @@ import {
   playGameOver,
   playLevelComplete,
   playMerge,
+  playOrderUp,
   playSandThud,
   playSpawnThud,
 } from './merge'
@@ -83,6 +84,8 @@ export interface EngineStatus {
   sampleRate: number
   muted: boolean
   ambienceLevel: number
+  /** orders: bar busyness 0..1 driving the murmur/clink layer gains */
+  barBusy: number
   ambience: {
     running: boolean
     scheduledUntil: number
@@ -102,6 +105,7 @@ class AudioEngine {
   private ambienceMeter: AnalyserNode | null = null
   private ambienceScheduledUntil = 0
   private ambienceLevel = 1
+  private barBusy = 0
 
   /** the live context, or null before the first user gesture */
   get context(): AudioContext | null {
@@ -210,6 +214,7 @@ class AudioEngine {
     const at = ctx.currentTime + 0.05
     const amb = buildAmbience(ctx, this.chain!.input, at)
     amb.level.gain.value = this.ambienceLevel
+    amb.setBusy(this.barBusy, ctx.currentTime)
     this.ambience = amb
     // meter tap for the harness smoke test (proves the bus carries signal live)
     const meter = ctx.createAnalyser()
@@ -240,6 +245,16 @@ class AudioEngine {
     return this.ambienceLevel
   }
 
+  /** orders: 0..1 bar busyness → murmur + clink layers 1× → ~1.8× */
+  setBarBusy(busy: number): void {
+    this.barBusy = clamp01(busy)
+    if (this.ctx && this.ambience) this.ambience.setBusy(this.barBusy, this.ctx.currentTime)
+  }
+
+  get barBusyValue(): number {
+    return this.barBusy
+  }
+
   /** harness probe: context + ambience state, plus a live RMS of the ambience bus */
   status(): EngineStatus {
     let rms = 0
@@ -256,6 +271,7 @@ class AudioEngine {
       sampleRate: this.ctx ? this.ctx.sampleRate : 0,
       muted: this.muted,
       ambienceLevel: this.ambienceLevel,
+      barBusy: this.barBusy,
       ambience: {
         running: this.ambience !== null && this.ambienceTimer !== null,
         scheduledUntil: this.ambienceScheduledUntil,
@@ -308,6 +324,7 @@ export function subscribe(bus: EventBus): () => void {
     bus.on('foul', () => playFoul()),
     bus.on('levelComplete', () => playLevelComplete()),
     bus.on('gameOver', () => playGameOver()),
+    bus.on('orderServed', (e) => playOrderUp(e.tip)),
     bus.on('muteChange', (e) => audio.setMuted(e.muted)),
   ]
   return () => {

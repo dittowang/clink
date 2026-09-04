@@ -1,4 +1,5 @@
 import { noiseBurst, partial, pinkNoise, whiteNoiseBuffer, type SourceSink } from './dsp'
+import { BAR_BUSY_GAIN_MAX } from '../config/orders'
 import { F_REF, scheduleImpact } from './impacts'
 
 /**
@@ -45,6 +46,8 @@ export interface AmbienceHandle {
   scheduleUntil(until: number, from: number): void
   /** silence + release every continuous source; scheduled one-shots end on their own */
   stop(): void
+  /** bar busyness 0..1: murmur + clink layers scale 1× → BAR_BUSY_GAIN_MAX (orders) */
+  setBusy(busy: number, at: number): void
 }
 
 /** the ambience bus's lowpass: takes the edge off, keeps wave hiss present */
@@ -586,6 +589,11 @@ export function buildAmbience(
     scheduleUntil(until, from) {
       if (stopped) return
       for (const s of schedulers) s.scheduleUntil(until, from)
+    },
+    setBusy(busy, at) {
+      const g = 1 + (BAR_BUSY_GAIN_MAX - 1) * (busy < 0 ? 0 : busy > 1 ? 1 : busy)
+      layerGains.murmur.gain.setTargetAtTime(want.has('murmur') ? g : 0, at, 0.4)
+      layerGains.clinks.gain.setTargetAtTime(want.has('clinks') ? g : 0, at, 0.4)
     },
     stop() {
       if (stopped) return

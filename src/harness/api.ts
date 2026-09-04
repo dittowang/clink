@@ -26,6 +26,15 @@ export interface HarnessApi {
   save?(): unknown
   /** QA: clear clink.save.v1 and the in-memory stars/leaderboard */
   wipeSave?(): void
+  /** Endless orders: the active card + run tallies (null outside Endless) */
+  order?(): {
+    tier: number | null
+    budget: number
+    pushesUsed: number
+    served: number
+    missed: number
+    poolShift: number
+  } | null
 }
 
 /**

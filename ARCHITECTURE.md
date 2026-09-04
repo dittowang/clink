@@ -37,7 +37,8 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
 - `src/core/events.ts` — typed EventBus. Physics/merge emit; render/audio/UI
   listen. RENDER NEVER WRITES BACK TO PHYSICS.
 - `src/core/drink.ts` — the Drink entity: tier + body + collider + interpolated
-  `root` + wobble `visual` + LiquidRig.
+  `root` + wobble `visual` + LiquidRig. States: tray / cradle / live /
+  merging / serving (orders: kinematic carry-off) / sand / dead.
 - `src/core/strings.ts` — every user-facing string, en + zh-CN.
 - `src/main.ts` — boot + scene router (`?scene=game|lineup|ladder`).
 
@@ -179,6 +180,23 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
 - Owns `createGameScene`, level defs (4 chapters × 6 + endless), spawn
   director (weighted pool, rubber band ±20–40%), HUD (HTML overlay, strings
   via `t()`), score pops via `Vector3.project`, localStorage persistence.
+- **Orders (Endless pacing)** — `src/levels/orders.ts` (ladder, budgets,
+  pool shift, seeded junk toss) + every constant in `src/config/orders.ts`.
+  One active order ("serve one drink of tier T"); a T at rest on the table
+  → SERVE (the drink goes `state: 'serving'`: kinematic, collider off,
+  lifts + glides off the LEFT/service side, removed; score =
+  mergeScore(T,1)×3×tip); budget of launches spent → MISS (card shake, one
+  seeded junk drink tossed just inside the foul line). Bus events
+  `orderNew` / `orderServed` / `orderMissed`. The director takes an order
+  bias (`setOrderBias`: T−1 ×1.6, T−2 ×1.25) and a shifted pool
+  (`setPool`, every 3 served); the order Rng is a separate salted stream so
+  the director's draws are unchanged for a given seed. Order-card
+  thumbnails: `src/render/thumbnails.ts` renders each tier inside the stage
+  scene (same program keys) into a 128² target → data URL, prerendered in
+  the warm-up (lazy in the harness). Ambience hook: `audio.setBarBusy(0..1)`
+  scales the murmur + clink layers 1× → 1.8×. Harness: `__game.order()`,
+  `state().order`, log events `orderNew/orderServed/orderMissed/junkToss/
+  junkLanded/poolShift`.
 
 ### src/harness — debug scenes + automation
 - `?scene=lineup`: all 12 on a bare plank, golden hour; `&silhouette=1`

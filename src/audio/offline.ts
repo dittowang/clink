@@ -3,7 +3,7 @@ import { AMBIENCE_LAYERS, buildAmbience, type AmbienceLayer } from './ambience'
 import { panForX } from './dsp'
 import { audio, buildMasterChain, buildSurfBed, type EngineStatus } from './engine'
 import { coerceMaterial, F_REF, isSoundMaterial, scheduleImpact } from './impacts'
-import { scheduleMerge } from './merge'
+import { scheduleMerge, scheduleOrderUp } from './merge'
 
 /**
  * window.__audio — the headless verification harness. Renders the SAME
@@ -121,6 +121,8 @@ export interface AudioHarness {
   renderAmbience(seconds?: number, seed?: number): Promise<AmbienceProbe>
   /** the LIVE engine's state (context, ambience scheduler, bus meter) */
   liveStatus(): EngineStatus
+  /** orders: the "order up" bell + tip tick at a given tip multiplier */
+  renderOrderUp(tip?: number): Promise<AudioProbe>
 }
 
 declare global {
@@ -537,6 +539,10 @@ export function installAudioHarness(): void {
     renderPan: (x) => renderPanProbe(x),
     renderAmbience: (seconds = 20, seed = AMBIENCE_SEED) => renderAmbienceProbe(seconds, seed),
     liveStatus: () => audio.status(),
+    renderOrderUp: (tip = 1.5) =>
+      renderDirect(0.8, (ctx, input) => {
+        scheduleOrderUp(ctx, input, T0, tip)
+      }),
     renderLevels: async () => {
       const impact = await renderMastered(0.6, (ctx, input) => {
         scheduleImpact(ctx, input, T0, 'glass', 'glass', F_REF)

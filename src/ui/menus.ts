@@ -30,7 +30,7 @@ export interface Menus {
   showLevelComplete(o: { level: LevelDef; stars: number; score: number; nextId: number | null }): void
   showLevelFailed(score: number): void
   showFoulGameOver(score: number): void
-  showEndlessGameOver(score: number, rank: number | null): void
+  showEndlessGameOver(score: number, rank: number | null, served: number): void
   hideAll(): void
   setPauseButtonVisible(v: boolean): void
   isOpen(): boolean
@@ -302,14 +302,23 @@ export function createMenus(cb: MenuCallbacks): Menus {
     p.append(button(t('retry'), BTN_PRIMARY, cb.onRestart), button(t('quit'), BTN_GHOST, cb.onQuit))
   }
 
-  function showEndlessGameOver(score: number, rank: number | null): void {
+  function showEndlessGameOver(score: number, rank: number | null, served: number): void {
     const p = panel(0.48)
     p.appendChild(el('div', 'font-size:32px;font-weight:800;', t('gameOverEndless')))
     if (rank === 0) p.appendChild(el('div', 'font-size:16px;color:#ffce54;font-weight:700;', t('newBest')))
     p.appendChild(
       el('div', 'font-size:19px;opacity:.92;font-variant-numeric:tabular-nums;', `${t('score')} ${score}`)
     )
-    const list = cb.save().endless
+    p.appendChild(
+      el(
+        'div',
+        'font-size:15px;opacity:.85;margin-top:-8px;font-variant-numeric:tabular-nums;',
+        t('ordersServed', { n: served })
+      )
+    )
+    const save = cb.save()
+    const list = save.endless
+    const orders = save.endlessOrders
     const board = el(
       'div',
       'min-width:240px;border-radius:14px;background:rgba(255,255,255,.08);padding:12px 18px;' +
@@ -324,7 +333,12 @@ export function createMenus(cb: MenuCallbacks): Menus {
         'display:flex;justify-content:space-between;gap:24px;font-size:15px;padding:3px 0;' +
           `font-variant-numeric:tabular-nums;${i === rank ? 'color:#ffce54;font-weight:700;' : 'opacity:.9;'}`
       )
-      row.append(el('span', '', `${i + 1}.`), el('span', '', String(s)))
+      const right = el('span', 'display:flex;gap:10px;align-items:baseline;')
+      right.append(
+        el('span', 'font-size:11px;opacity:.7;', t('servedShort', { n: orders[i] ?? 0 })),
+        el('span', '', String(s))
+      )
+      row.append(el('span', '', `${i + 1}.`), right)
       board.appendChild(row)
     })
     // no header over an empty list — a merge-less first run charts nothing

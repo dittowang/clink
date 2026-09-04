@@ -7,6 +7,7 @@ export type DrinkState =
   | 'cradle'   // in the launch cradle, aimable
   | 'live'     // simulated on the table
   | 'merging'  // kinematic, snapping to centroid
+  | 'serving'  // kinematic, collider off, carried off to the service side (orders)
   | 'sand'     // fell off the open edge, rotations unlocked, dying in the sand
   | 'dead'     // removed
 

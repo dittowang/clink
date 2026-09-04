@@ -45,6 +45,17 @@ const TABLE = {
   lostToSand:       { en: 'Lost to the sand', 'zh-CN': '掉进沙子里了' },
   leaderboard:      { en: 'Local Best', 'zh-CN': '本地最佳' },
   windWarn:         { en: 'Windy!', 'zh-CN': '起风了！' },
+  // orders (Endless)
+  order:            { en: 'Order', 'zh-CN': '点单' },
+  serve:            { en: 'Serve', 'zh-CN': '上菜' },
+  served:           { en: 'Served!', 'zh-CN': '上菜！' },
+  servedCount:      { en: 'Served {n}', 'zh-CN': '已上 {n} 杯' },
+  servedShort:      { en: '{n} served', 'zh-CN': '{n} 杯' },
+  customerLeft:     { en: 'Customer left', 'zh-CN': '客人走了' },
+  ordersServed:     { en: 'Orders served: {n}', 'zh-CN': '完成点单：{n}' },
+  barHeatingUp:     { en: 'The bar is heating up', 'zh-CN': '酒吧热闹起来了' },
+  tip:              { en: 'Tip ×{n}', 'zh-CN': '小费 ×{n}' },
+  orderPushes:      { en: '{n} pushes', 'zh-CN': '{n} 次推动' },
   // tier names
   tier1:  { en: 'Juice Box', 'zh-CN': '果汁盒' },
   tier2:  { en: 'Slim Can', 'zh-CN': '细罐苏打' },

@@ -1,5 +1,6 @@
+import { buildAmbience, type AmbienceHandle } from './ambience'
 import type { EventBus } from '../core/events'
-import { panForX, pinkNoise } from './dsp'
+import { clamp01, panForX } from './dsp'
 import { playImpact, type ScheduledVoice } from './impacts'
 import {
   playFoul,
@@ -10,6 +11,9 @@ import {
   playSpawnThud,
 } from './merge'
 import { SlideVoice } from './slide'
+
+/** the surf bed lives with the other ambience layers now; kept exported for offline.ts */
+export { buildSurfBed } from './ambience'
 
 /**
  * The AudioEngine singleton. The AudioContext is created lazily on the first
@@ -65,37 +69,25 @@ export interface VoiceHandle {
 }
 
 /**
- * Surf bed: two pink-noise sources through a ~600 Hz lowpass, each swelling
- * on its own slow LFO (0.08 / 0.13 Hz) so the beach breathes instead of
- * hissing. Shared with offline.ts so the level claim is verifiable.
+ * Ambience look-ahead: discrete events (waves, clinks, gull calls, music
+ * notes) are scheduled this far ahead from a timer. Background tabs throttle
+ * timers to ≥ 1 s (minutes after long hides) — the lookahead covers the
+ * former, and scheduleUntil's `from` drops the backlog after the latter.
  */
-export function buildSurfBed(ctx: BaseAudioContext, dest: AudioNode, startAt: number): void {
-  // Calibrated against the offline renderLevels probe: post-chain surf peak
-  // sits ~-26 dB under the post-chain peak of a full-force glass impact.
-  // (Not derived from VOICE_PEAK: the chain crushes impact transients ~12 dB
-  // but passes the slow low surf almost untouched.)
-  const SURF_LEVEL = 0.0112
-  const lp = ctx.createBiquadFilter()
-  lp.type = 'lowpass'
-  lp.frequency.value = 600
-  lp.Q.value = 0.5
-  lp.connect(dest)
-  const beds: Array<{ lfoHz: number; base: number }> = [
-    { lfoHz: 0.08, base: SURF_LEVEL },
-    { lfoHz: 0.13, base: SURF_LEVEL * 0.75 },
-  ]
-  for (const bed of beds) {
-    const pink = pinkNoise(ctx)
-    const g = ctx.createGain()
-    g.gain.value = bed.base
-    const lfo = ctx.createOscillator()
-    lfo.frequency.value = bed.lfoHz
-    const depth = ctx.createGain()
-    depth.gain.value = bed.base * 0.55 // swell between ~0.45x and ~1.55x
-    lfo.connect(depth).connect(g.gain)
-    pink.out.connect(g).connect(lp)
-    pink.start(startAt)
-    lfo.start(startAt + Math.random() * 4) // offset the two swells
+const AMBIENCE_LOOKAHEAD_S = 12
+const AMBIENCE_TICK_MS = 1500
+
+export interface EngineStatus {
+  contextState: AudioContextState | 'none'
+  currentTime: number
+  sampleRate: number
+  muted: boolean
+  ambienceLevel: number
+  ambience: {
+    running: boolean
+    scheduledUntil: number
+    /** RMS of the ambience bus over the last analyser frame (live meter) */
+    rms: number
   }
 }
 
@@ -105,6 +97,11 @@ class AudioEngine {
   private voices: Voice[] = []
   private slide: SlideVoice | null = null
   private muted = false
+  private ambience: AmbienceHandle | null = null
+  private ambienceTimer: ReturnType<typeof setInterval> | null = null
+  private ambienceMeter: AnalyserNode | null = null
+  private ambienceScheduledUntil = 0
+  private ambienceLevel = 1
 
   /** the live context, or null before the first user gesture */
   get context(): AudioContext | null {
@@ -127,7 +124,7 @@ class AudioEngine {
       this.ctx = ctx
       this.chain = buildMasterChain(ctx)
       this.applyMute()
-      this.startSurf()
+      this.startAmbience()
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume()
   }
@@ -204,9 +201,83 @@ class AudioEngine {
     this.slide.update(speed, panForX(x), this.ctx.currentTime)
   }
 
-  private startSurf(): void {
+  /**
+   * Ambience (surf bed + waves + beach bar) starts with the context and runs
+   * for its life; the timer keeps discrete events scheduled ahead.
+   */
+  private startAmbience(): void {
     const ctx = this.ctx!
-    buildSurfBed(ctx, this.chain!.input, ctx.currentTime + 0.05)
+    const at = ctx.currentTime + 0.05
+    const amb = buildAmbience(ctx, this.chain!.input, at)
+    amb.level.gain.value = this.ambienceLevel
+    this.ambience = amb
+    // meter tap for the harness smoke test (proves the bus carries signal live)
+    const meter = ctx.createAnalyser()
+    meter.fftSize = 1024
+    const sink = ctx.createGain()
+    sink.gain.value = 0
+    amb.level.connect(meter).connect(sink).connect(ctx.destination)
+    this.ambienceMeter = meter
+    const tick = (): void => {
+      if (!this.ctx || !this.ambience) return
+      const now = this.ctx.currentTime
+      this.ambienceScheduledUntil = now + AMBIENCE_LOOKAHEAD_S
+      this.ambience.scheduleUntil(this.ambienceScheduledUntil, now)
+    }
+    tick()
+    this.ambienceTimer = setInterval(tick, AMBIENCE_TICK_MS)
+  }
+
+  /** 0..1 ambience level (default 1); persisting it is the caller's job */
+  setAmbienceLevel(level: number): void {
+    this.ambienceLevel = clamp01(level)
+    if (this.ctx && this.ambience) {
+      this.ambience.level.gain.setTargetAtTime(this.ambienceLevel, this.ctx.currentTime, 0.05)
+    }
+  }
+
+  get ambienceLevelValue(): number {
+    return this.ambienceLevel
+  }
+
+  /** harness probe: context + ambience state, plus a live RMS of the ambience bus */
+  status(): EngineStatus {
+    let rms = 0
+    if (this.ambienceMeter) {
+      const buf = new Float32Array(this.ambienceMeter.fftSize)
+      this.ambienceMeter.getFloatTimeDomainData(buf)
+      let s = 0
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]
+      rms = Math.sqrt(s / buf.length)
+    }
+    return {
+      contextState: this.ctx ? this.ctx.state : 'none',
+      currentTime: this.ctx ? this.ctx.currentTime : 0,
+      sampleRate: this.ctx ? this.ctx.sampleRate : 0,
+      muted: this.muted,
+      ambienceLevel: this.ambienceLevel,
+      ambience: {
+        running: this.ambience !== null && this.ambienceTimer !== null,
+        scheduledUntil: this.ambienceScheduledUntil,
+        rms,
+      },
+    }
+  }
+
+  /** stop the ambience and close the context; the next unlock() starts fresh */
+  dispose(): void {
+    if (this.ambienceTimer !== null) clearInterval(this.ambienceTimer)
+    this.ambienceTimer = null
+    this.ambience?.stop()
+    this.ambience = null
+    this.ambienceMeter = null
+    this.ambienceScheduledUntil = 0
+    this.voices = []
+    this.slide = null
+    const ctx = this.ctx
+    this.ctx = null
+    this.chain = null
+    if (ctx) void ctx.close().catch(() => undefined)
   }
 }
 

@@ -166,6 +166,14 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
 - Integration: `subscribe(bus)` + `resumeOnGesture(el)` from
   `src/audio/engine.ts` — one call each; `audio.setMuted(b)` applies mute
   (persistence is the caller's job).
+- Ambience (`src/audio/ambience.ts`, started with the context on the first
+  gesture): surf bed + discrete wave cycles (swell/break/retreat, panned,
+  every 6–11 s) + beach-bar layers (crowd murmur, occasional clinks, sparse
+  gulls, a far-away pentatonic mallet loop at 76 BPM). Whole mix sits
+  ≥ 15 dB under a full-force impact and can never engage the limiter alone.
+  `engine.setAmbienceLevel(0..1)`; probes `renderAmbience(seconds, seed)`,
+  `liveStatus()`; capture specs `--audio=ambience[:s[:seed]]` and
+  `--audio=smoke` (real-time gesture + context check).
 
 ### src/levels — game scene, director, HUD, menus, persistence
 - Owns `createGameScene`, level defs (4 chapters × 6 + endless), spawn

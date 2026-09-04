@@ -28,8 +28,14 @@
  *   --keep-open                  don't close (debugging)
  *   --audio=SPEC                 offline audio probe via window.__audio.
  *                                SPEC: "impact:<mat>:<forceN>" | "merge:<tier>[:chain]"
- *                                | "pileup" | "surf" | "matrix" (full verification
- *                                sweep) | comma-separated list of the above.
+ *                                | "pileup" | "surf" | "levels" | "pan:<x>"
+ *                                | "ambience[:seconds[:seed]]" (offline render of
+ *                                the whole ambience + per-layer solos, 20 s, seed 7)
+ *                                | "smoke" (REAL-TIME: a trusted pointerdown on
+ *                                the canvas unlocks the live engine, waits 3 s,
+ *                                reports __audio.liveStatus() + console errors)
+ *                                | "matrix" (full verification sweep)
+ *                                | comma-separated list of the above.
  *                                JSON goes to --out (or stdout). Screenshot/state
  *                                capture is skipped in this mode.
  */
@@ -83,13 +89,23 @@ async function main() {
       '--use-angle=swiftshader',
       '--disable-gpu-sandbox',
       '--no-sandbox',
+      // the --audio=smoke probe unlocks the live AudioContext from a trusted
+      // pointer event; the policy flag is belt-and-braces for headless runs
+      '--autoplay-policy=no-user-gesture-required',
     ],
   })
   const page = await browser.newPage({ viewport: { width: size[0], height: size[1] } })
+  const consoleErrors = []
   page.on('console', (msg) => {
-    if (msg.type() === 'error') console.error('[page]', msg.text())
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text())
+      console.error('[page]', msg.text())
+    }
   })
-  page.on('pageerror', (err) => console.error('[pageerror]', err.message))
+  page.on('pageerror', (err) => {
+    consoleErrors.push(`pageerror: ${err.message}`)
+    console.error('[pageerror]', err.message)
+  })
 
   const extra = args['url-extra'] ?? ''
   const url = `http://localhost:${PORT}/?harness=1&scene=${scene}&seed=${seed}${extra}`
@@ -115,7 +131,24 @@ async function main() {
     // the boot path stays untouched (vite transforms the TS on demand)
     await page.addScriptTag({ type: 'module', content: `import '/src/audio/offline.ts'` })
     await page.waitForFunction(() => !!window.__audio, null, { timeout: 15000 })
-    const result = await page.evaluate(async (spec) => {
+    // "smoke" is the one REAL-TIME probe: it needs a trusted input event
+    // (page.mouse, not a synthetic dispatch) so autoplay policy lets the live
+    // AudioContext run; it is handled here, every other spec renders offline
+    const smoke = async () => {
+      const box = await page.locator('canvas').first().boundingBox()
+      const before = await page.evaluate(() => window.__audio.liveStatus())
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.8)
+      await page.mouse.down()
+      await page.mouse.up()
+      await page.waitForTimeout(3000)
+      const after = await page.evaluate(() => window.__audio.liveStatus())
+      return { before, after, consoleErrors: [...consoleErrors] }
+    }
+    const specs = String(args.audio).split(',')
+    const smokeResults = {}
+    for (const sp of specs) if (sp === 'smoke') smokeResults[sp] = await smoke()
+    const offlineSpec = specs.filter((sp) => sp !== 'smoke').join(',')
+    const offlineResult = !offlineSpec ? null : await page.evaluate(async (spec) => {
       const A = window.__audio
       const one = async (s) => {
         const [kind, a, b] = s.split(':')
@@ -125,6 +158,7 @@ async function main() {
         if (kind === 'surf') return A.renderSurf()
         if (kind === 'levels') return A.renderLevels()
         if (kind === 'pan') return A.renderPan(Number(a ?? 0))
+        if (kind === 'ambience') return A.renderAmbience(Number(a ?? 20), b === undefined ? undefined : Number(b))
         throw new Error(`unknown --audio spec: ${s}`)
       }
       if (spec === 'matrix') {
@@ -140,6 +174,7 @@ async function main() {
         out['pileup'] = await one('pileup')
         out['surf'] = await one('surf')
         out['levels'] = await one('levels')
+        out['ambience'] = await one('ambience')
         return out
       }
       if (spec.includes(',')) {
@@ -148,7 +183,10 @@ async function main() {
         return out
       }
       return one(spec)
-    }, String(args.audio))
+    }, offlineSpec)
+    let result
+    if (specs.length === 1) result = specs[0] === 'smoke' ? smokeResults.smoke : offlineResult
+    else result = { ...(offlineResult ?? {}), ...smokeResults }
     const json = JSON.stringify(result, null, 2)
     if (outPath) {
       writeFileSync(outPath, json)

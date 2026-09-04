@@ -1,6 +1,7 @@
 import type { SoundMaterial } from '../config/tiers'
+import { AMBIENCE_LAYERS, buildAmbience, type AmbienceLayer } from './ambience'
 import { panForX } from './dsp'
-import { buildMasterChain, buildSurfBed } from './engine'
+import { audio, buildMasterChain, buildSurfBed, type EngineStatus } from './engine'
 import { coerceMaterial, F_REF, isSoundMaterial, scheduleImpact } from './impacts'
 import { scheduleMerge } from './merge'
 
@@ -47,13 +48,52 @@ export interface PanProbe {
   measuredPan: number
 }
 
-/** post-master-chain peaks of the three level anchors + their ratios */
+/** post-master-chain peaks of the level anchors + their ratios */
 export interface LevelReport {
   impactChainPeak: number
   mergeChainPeak: number
   surfChainPeak: number
   mergeVsImpactDb: number
   surfVsImpactDb: number
+  /** whole ambience mix (all layers, 20 s, stereo: max over channels) */
+  ambienceChainPeak: number
+  ambienceChainRms: number
+  /** MUST be ≤ -14 (brief: ambience ≥ 14 dB under a full-force impact) */
+  ambienceVsImpactDb: number
+}
+
+/** power split of a render into the bands the ambience claims live in */
+export interface BandReport {
+  /** fraction of total power per band (sums to 1) */
+  fraction: Record<string, number>
+  /** the same in dB relative to the total */
+  db: Record<string, number>
+}
+
+export interface LayerProbe extends AudioProbe {
+  rmsDbfs: number
+  /** layer peak vs the post-chain peak of a full-force glass impact */
+  vsImpactPeakDb: number
+  bands: BandReport
+}
+
+export interface AmbienceProbe extends AudioProbe {
+  seconds: number
+  seed: number
+  /** pre-chain peak of the whole bus vs the compressor threshold (0.5) */
+  busPeak: number
+  limiterHeadroomDb: number
+  /** vs the post-chain peak of a full-force glass impact (renderLevels anchor) */
+  impactChainPeak: number
+  vsImpactPeakDb: number
+  /** 100 ms RMS frames of the whole mix (envelope at wave resolution) */
+  rmsFrames: number[]
+  /** onsets (s) of the wave swells picked from the waves layer's frames */
+  waveSwellTimes: number[]
+  /** Goertzel magnitude (dB) of the music layer at its pentatonic pitches vs
+   *  the midpoints between them — energy must sit on the notes */
+  musicTones: { noteHz: number[]; noteDb: number[]; betweenHz: number[]; betweenDb: number[]; noteMinusBetweenDb: number }
+  layers: Record<AmbienceLayer, LayerProbe>
 }
 
 /**
@@ -75,6 +115,12 @@ export interface AudioHarness {
   renderLevels(): Promise<LevelReport>
   /** stereo render of a glass impact panned by table x via the live pan law */
   renderPan(x: number): Promise<PanProbe>
+  /** the whole ambience (bed + waves + bar) through the chain, plus each layer
+   *  solo; `seed` picks the stochastic layers' PRNG (default 7) so a sweep
+   *  over seeds bounds the live engine's random cases */
+  renderAmbience(seconds?: number, seed?: number): Promise<AmbienceProbe>
+  /** the LIVE engine's state (context, ambience scheduler, bus meter) */
+  liveStatus(): EngineStatus
 }
 
 declare global {
@@ -104,7 +150,41 @@ const round = (v: number, digits: number): number => {
 }
 
 function analyze(buf: AudioBuffer): AudioProbe {
-  const x = buf.getChannelData(0)
+  return analyzeSamples(buf.getChannelData(0), buf.sampleRate)
+}
+
+/**
+ * Stereo mix probe: peak/envelope are the max over both channels, spectrum
+ * and centroid come from the (L+R)/2 downmix, rms is the power mean of both.
+ */
+function analyzeStereo(buf: AudioBuffer): AudioProbe {
+  if (buf.numberOfChannels < 2) return analyze(buf)
+  const l = buf.getChannelData(0)
+  const r = buf.getChannelData(1)
+  const n = l.length
+  const mono = new Float32Array(n)
+  const absMax = new Float32Array(n)
+  let sumSq = 0
+  for (let i = 0; i < n; i++) {
+    mono[i] = 0.5 * (l[i] + r[i])
+    const al = Math.abs(l[i])
+    const ar = Math.abs(r[i])
+    absMax[i] = al > ar ? al : ar
+    sumSq += 0.5 * (l[i] * l[i] + r[i] * r[i])
+  }
+  const base = analyzeSamples(mono, buf.sampleRate)
+  const peakProbe = analyzeSamples(absMax, buf.sampleRate)
+  return {
+    ...base,
+    peak: peakProbe.peak,
+    rms: round(Math.sqrt(sumSq / n), 6),
+    envelope: peakProbe.envelope,
+    env: peakProbe.envelope,
+    durationToMinus40dB: peakProbe.durationToMinus40dB,
+  }
+}
+
+function analyzeSamples(x: Float32Array, sampleRate: number): AudioProbe {
   const n = x.length
 
   let peak = 0
@@ -138,7 +218,7 @@ function analyze(buf: AudioBuffer): AudioProbe {
       last = b
     }
   }
-  const binDur = binLen / buf.sampleRate
+  const binDur = binLen / sampleRate
   const durationToMinus40dB = first < 0 ? 0 : (last - first + 1) * binDur
 
   const spectrumFreqs = new Array<number>(SPEC_BINS)
@@ -149,7 +229,7 @@ function analyze(buf: AudioBuffer): AudioProbe {
   for (let k = 0; k < SPEC_BINS; k++) {
     const f = SPEC_F_LO * Math.pow(ratio, k / (SPEC_BINS - 1))
     spectrumFreqs[k] = round(f, 1)
-    const mag = goertzelMag(x, buf.sampleRate, f)
+    const mag = goertzelMag(x, sampleRate, f)
     spectrum[k] = round(20 * Math.log10(mag + 1e-9), 2)
     linSum += mag
     linWeighted += mag * f
@@ -244,6 +324,194 @@ const PILEUP_MATS: Array<[string, string]> = [
   ['steel', 'steel'],
 ]
 
+/** in-place iterative radix-2 FFT (re/im), n a power of two */
+function fft(re: Float64Array, im: Float64Array): void {
+  const n = re.length
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1
+    for (; j & bit; bit >>= 1) j ^= bit
+    j ^= bit
+    if (i < j) {
+      const tr = re[i]
+      re[i] = re[j]
+      re[j] = tr
+      const ti = im[i]
+      im[i] = im[j]
+      im[j] = ti
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (-2 * Math.PI) / len
+    const wr = Math.cos(ang)
+    const wi = Math.sin(ang)
+    for (let i = 0; i < n; i += len) {
+      let cr = 1
+      let ci = 0
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k
+        const b = a + len / 2
+        const xr = re[b] * cr - im[b] * ci
+        const xi = re[b] * ci + im[b] * cr
+        re[b] = re[a] - xr
+        im[b] = im[a] - xi
+        re[a] += xr
+        im[a] += xi
+        const ncr = cr * wr - ci * wi
+        ci = cr * wi + ci * wr
+        cr = ncr
+      }
+    }
+  }
+}
+
+const BAND_EDGES: Array<[string, number, number]> = [
+  ['sub250', 0, 250],
+  ['murmur250_900', 250, 900],
+  ['mid900_2k', 900, 2000],
+  ['hi2k_5k', 2000, 5000],
+  ['air5k+', 5000, Infinity],
+]
+
+/** power split over BAND_EDGES from a 2^19-point FFT of the first ~10.9 s (Hann) */
+function bandReport(buf: AudioBuffer): BandReport {
+  const x = buf.getChannelData(0)
+  const n = Math.min(1 << 19, 1 << Math.floor(Math.log2(x.length)))
+  const re = new Float64Array(n)
+  const im = new Float64Array(n)
+  for (let i = 0; i < n; i++) re[i] = x[i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / n))
+  fft(re, im)
+  const power = new Map<string, number>()
+  let total = 0
+  const hzPerBin = buf.sampleRate / n
+  for (let k = 1; k < n / 2; k++) {
+    const p = re[k] * re[k] + im[k] * im[k]
+    const f = k * hzPerBin
+    total += p
+    for (const [name, lo, hi] of BAND_EDGES) {
+      if (f >= lo && f < hi) {
+        power.set(name, (power.get(name) ?? 0) + p)
+        break
+      }
+    }
+  }
+  const fraction: Record<string, number> = {}
+  const db: Record<string, number> = {}
+  for (const [name] of BAND_EDGES) {
+    const frac = total > 0 ? (power.get(name) ?? 0) / total : 0
+    fraction[name] = round(frac, 4)
+    db[name] = round(10 * Math.log10(frac + 1e-12), 1)
+  }
+  return { fraction, db }
+}
+
+/** 100 ms RMS frames, max over channels */
+function rmsFrames(buf: AudioBuffer, frameS = 0.1): number[] {
+  const len = Math.floor(buf.sampleRate * frameS)
+  const frames = Math.floor(buf.length / len)
+  const out = new Array<number>(frames).fill(0)
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const x = buf.getChannelData(c)
+    for (let f = 0; f < frames; f++) {
+      let s = 0
+      for (let i = f * len; i < (f + 1) * len; i++) s += x[i] * x[i]
+      out[f] = Math.max(out[f], Math.sqrt(s / len))
+    }
+  }
+  return out.map((v) => round(v, 5))
+}
+
+/** local maxima of a frame series ≥ minSepFrames apart and above thr·max */
+function pickSwells(frames: number[], frameS: number, minSepS: number, thr: number): number[] {
+  const max = Math.max(...frames)
+  const sep = Math.round(minSepS / frameS)
+  const out: number[] = []
+  for (let i = 0; i < frames.length; i++) {
+    if (frames[i] < thr * max) continue
+    let isMax = true
+    for (let j = Math.max(0, i - sep); j <= Math.min(frames.length - 1, i + sep); j++) {
+      if (frames[j] > frames[i]) {
+        isMax = false
+        break
+      }
+    }
+    // strict > above means a tied plateau yields every tied frame: keep the first
+    if (isMax && (out.length === 0 || i * frameS - out[out.length - 1] >= minSepS)) out.push(round(i * frameS, 1))
+  }
+  return out
+}
+
+const AMBIENCE_SEED = 7
+const PENTA_HZ = [130.81, 261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0]
+
+function renderAmbienceBuffer(
+  seconds: number,
+  layers: readonly AmbienceLayer[],
+  mastered: boolean,
+  seed = AMBIENCE_SEED
+): Promise<AudioBuffer> {
+  const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * seconds), SAMPLE_RATE)
+  const dest: AudioNode = mastered ? buildMasterChain(ctx).input : ctx.destination
+  const amb = buildAmbience(ctx, dest, 0, { seed, layers })
+  amb.scheduleUntil(seconds, 0)
+  return ctx.startRendering()
+}
+
+async function renderAmbienceProbe(seconds: number, seed: number): Promise<AmbienceProbe> {
+  const impact = await renderMastered(0.6, (ctx, input) => {
+    scheduleImpact(ctx, input, T0, 'glass', 'glass', F_REF)
+  })
+  const db = (a: number, b: number): number => round(20 * Math.log10(Math.max(a, 1e-9) / Math.max(b, 1e-9)), 1)
+
+  const mixBuf = await renderAmbienceBuffer(seconds, AMBIENCE_LAYERS, true, seed)
+  const mix = analyzeStereo(mixBuf)
+  const busBuf = await renderAmbienceBuffer(seconds, AMBIENCE_LAYERS, false, seed)
+  const bus = analyzeStereo(busBuf)
+
+  const layers = {} as Record<AmbienceLayer, LayerProbe>
+  let wavesBuf: AudioBuffer | null = null
+  let musicBuf: AudioBuffer | null = null
+  for (const name of AMBIENCE_LAYERS) {
+    const buf = await renderAmbienceBuffer(seconds, [name], true, seed)
+    if (name === 'waves') wavesBuf = buf
+    if (name === 'music') musicBuf = buf
+    const probe = analyzeStereo(buf)
+    layers[name] = {
+      ...probe,
+      rmsDbfs: round(20 * Math.log10(probe.rms + 1e-9), 1),
+      vsImpactPeakDb: db(probe.peak, impact.peak),
+      bands: bandReport(buf),
+    }
+  }
+
+  const waveFrames = rmsFrames(wavesBuf!)
+  const musicMono = musicBuf!.getChannelData(0)
+  const toneDb = (hz: number): number => round(20 * Math.log10(goertzelMag(musicMono, SAMPLE_RATE, hz) + 1e-9), 1)
+  const betweenHz = PENTA_HZ.slice(1).map((hz, i) => round(Math.sqrt(hz * PENTA_HZ[i]), 2))
+  const noteDb = PENTA_HZ.map(toneDb)
+  const betweenDb = betweenHz.map(toneDb)
+  const mean = (a: number[]): number => a.reduce((x, y) => x + y, 0) / a.length
+
+  return {
+    ...mix,
+    seconds,
+    seed,
+    busPeak: bus.peak,
+    limiterHeadroomDb: db(0.5, bus.peak),
+    impactChainPeak: impact.peak,
+    vsImpactPeakDb: db(mix.peak, impact.peak),
+    rmsFrames: rmsFrames(mixBuf),
+    waveSwellTimes: pickSwells(waveFrames, 0.1, 4, 0.45),
+    musicTones: {
+      noteHz: PENTA_HZ,
+      noteDb,
+      betweenHz,
+      betweenDb,
+      noteMinusBetweenDb: round(mean(noteDb) - mean(betweenDb), 1),
+    },
+    layers,
+  }
+}
+
 export function installAudioHarness(): void {
   if (typeof window === 'undefined') return
   window.__audio = {
@@ -267,6 +535,8 @@ export function installAudioHarness(): void {
         buildSurfBed(ctx, input, 0)
       }),
     renderPan: (x) => renderPanProbe(x),
+    renderAmbience: (seconds = 20, seed = AMBIENCE_SEED) => renderAmbienceProbe(seconds, seed),
+    liveStatus: () => audio.status(),
     renderLevels: async () => {
       const impact = await renderMastered(0.6, (ctx, input) => {
         scheduleImpact(ctx, input, T0, 'glass', 'glass', F_REF)
@@ -277,6 +547,7 @@ export function installAudioHarness(): void {
       const surf = await renderMastered(2, (ctx, input) => {
         buildSurfBed(ctx, input, 0)
       })
+      const ambience = analyzeStereo(await renderAmbienceBuffer(20, AMBIENCE_LAYERS, true))
       const db = (a: number, b: number): number => round(20 * Math.log10(a / Math.max(b, 1e-9)), 1)
       return {
         impactChainPeak: impact.peak,
@@ -284,6 +555,9 @@ export function installAudioHarness(): void {
         surfChainPeak: surf.peak,
         mergeVsImpactDb: db(merge.peak, impact.peak),
         surfVsImpactDb: db(surf.peak, impact.peak),
+        ambienceChainPeak: ambience.peak,
+        ambienceChainRms: ambience.rms,
+        ambienceVsImpactDb: db(ambience.peak, impact.peak),
       }
     },
   }

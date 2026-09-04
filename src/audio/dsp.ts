@@ -126,7 +126,7 @@ export function partial(
  * direct tap. Slope is -3 dB/oct down to ~10 Hz — reads as distant surf once
  * lowpassed. Output normalized to roughly ±1.
  */
-export function pinkNoise(ctx: BaseAudioContext): { out: GainNode; start: (t: number) => void } {
+export function pinkNoise(ctx: BaseAudioContext): { out: GainNode; start: (t: number) => void; stop: () => void } {
   const src = ctx.createBufferSource()
   src.buffer = whiteNoiseBuffer(ctx)
   src.loop = true
@@ -144,5 +144,9 @@ export function pinkNoise(ctx: BaseAudioContext): { out: GainNode; start: (t: nu
   const direct = ctx.createGain()
   direct.gain.value = 0.1848
   src.connect(direct).connect(out)
-  return { out, start: (t: number) => src.start(t, Math.random() * (NOISE_SECONDS - 0.5)) }
+  return {
+    out,
+    start: (t: number) => src.start(t, Math.random() * (NOISE_SECONDS - 0.5)),
+    stop: () => src.stop(),
+  }
 }

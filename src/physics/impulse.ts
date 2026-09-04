@@ -1,4 +1,4 @@
-import { PUSH_K, PUSH_ALPHA, MASS_KG } from '../config/massLadder'
+import { TARGET_STOP_M, MASS_KG } from '../config/massLadder'
 import { TIERS, type TierId } from '../config/tiers'
 import { tableFriction, LINEAR_DAMPING } from './materials'
 import { applyLaunchLeanKick } from './feel'
@@ -11,15 +11,38 @@ import type { Drink } from '../core/drink'
 
 const GRAVITY = 9.81
 
-/** J = PUSH_K · pull01 · m^PUSH_ALPHA (N·s). The one impulse formula. */
-export function launchImpulse(tier: TierId, pull01: number): number {
-  const p = Math.min(Math.max(pull01, 0), 1)
-  return PUSH_K * p * Math.pow(MASS_KG[tier], PUSH_ALPHA)
+/**
+ * Full-pull launch speed per tier: the v0 whose free slide (friction +
+ * damping model below) stops exactly TARGET_STOP_M out. Solved once per tier
+ * by bisection on stopDistanceForSpeed and cached — the launch law is
+ * "same stopping point for every drink", so J = m * v0 (heavier = harder).
+ */
+const fullSpeedCache = new Map<TierId, number>()
+
+function fullLaunchSpeed(tier: TierId): number {
+  let v = fullSpeedCache.get(tier)
+  if (v === undefined) {
+    let lo = 0, hi = 8
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2
+      if (stopDistanceForSpeed(tier, mid) < TARGET_STOP_M) lo = mid
+      else hi = mid
+    }
+    v = (lo + hi) / 2
+    fullSpeedCache.set(tier, v)
+  }
+  return v
 }
 
-/** Launch speed the impulse produces: v0 = J / m (m/s). */
+/** Launch speed for a pull: v0 = pull01 * fullLaunchSpeed (m/s). */
 export function launchSpeed(tier: TierId, pull01: number): number {
-  return launchImpulse(tier, pull01) / MASS_KG[tier]
+  const p = Math.min(Math.max(pull01, 0), 1)
+  return p * fullLaunchSpeed(tier)
+}
+
+/** J = m * v0 (N·s). The one impulse formula. */
+export function launchImpulse(tier: TierId, pull01: number): number {
+  return MASS_KG[tier] * launchSpeed(tier, pull01)
 }
 
 // scratch — applyImpulse copies the values, safe to reuse
@@ -59,7 +82,11 @@ export function applyLaunch(drink: Drink, angleRad: number, pull01: number): voi
  * a few percent, so no fudge factor is applied.
  */
 export function predictStopDistance(tier: TierId, pull01: number): number {
-  const v0 = launchSpeed(tier, pull01)
+  return stopDistanceForSpeed(tier, launchSpeed(tier, pull01))
+}
+
+/** free-slide distance for a given launch speed (the model above) */
+export function stopDistanceForSpeed(tier: TierId, v0: number): number {
   if (v0 <= 0) return 0
   const a = tableFriction(TIERS[tier].material) * GRAVITY
   const c = LINEAR_DAMPING

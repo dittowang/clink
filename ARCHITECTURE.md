@@ -112,9 +112,11 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
 - Friction/restitution per SoundMaterial pair (see brief: 0.25–0.55 /
   0.10–0.35). Linear damping tuned so sliding decays believably (billiards,
   not air hockey).
-- Slingshot: pointer ray → table plane; pull = clamp(origin − hit, max);
-  release: `applyImpulse(J·dir)`, J from massLadder. Stop marker at
-  d = v²/(2 μ_eff g) along dir, drawn as a ring on the table.
+- Slingshot: swipe anywhere; the swipe direction (table-plane, ±35° from
+  straight ahead) is the launch direction; release: `applyImpulse(m·v0·dir)`
+  with v0 solved per tier so every drink's free slide would stop
+  TARGET_STOP_M (massLadder.ts) out — beyond the far rail. Marker ring at
+  the first rail/stop along the true aim line, plus a one-bounce preview.
 - Lean/wobble: render-only damped spring (2–4 Hz, ζ 0.3–0.5) driven by body
   acceleration; writes `visual` rotation and the liquid plane tilt. Reads
   physics, NEVER writes.

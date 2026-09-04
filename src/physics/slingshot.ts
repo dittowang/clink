@@ -30,8 +30,12 @@ export const LAUNCH_POWER = 1.0
  */
 const DRAG_MIN = 0.05
 
-/** widest aim from straight ahead (−Z); still lets bank shots hit the side rails */
-const MAX_AIM_DEG = 82
+/**
+ * widest aim from straight ahead (−Z). 35° still reaches every side-rail
+ * point beyond z ≈ +0.2 for bank shots; wider shots only ever slid into a
+ * side rail 30 cm out, which the player read as "it went where I didn't aim".
+ */
+const MAX_AIM_DEG = 35
 
 /** kept for API compatibility with the ladder harness scene */
 export const MAX_PULL = 0.45
@@ -68,6 +72,9 @@ export class SlingshotController {
   private readonly raycaster = new THREE.Raycaster()
   private readonly line: THREE.Mesh
   private readonly linePos: THREE.BufferAttribute
+  /** fainter one-bounce preview after the first rail hit (bank shots) */
+  private readonly bounce: THREE.Mesh
+  private readonly bouncePos: THREE.BufferAttribute
   private readonly ring: THREE.Mesh
   private readonly ringMat: THREE.MeshBasicMaterial
 
@@ -93,6 +100,22 @@ export class SlingshotController {
     )
     this.line.frustumCulled = false
 
+    const bounceGeo = new THREE.BufferGeometry()
+    this.bouncePos = new THREE.BufferAttribute(new Float32Array(4 * 3), 3)
+    bounceGeo.setAttribute('position', this.bouncePos)
+    bounceGeo.setIndex([0, 1, 2, 2, 1, 3])
+    this.bounce = new THREE.Mesh(
+      bounceGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.16,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    )
+    this.bounce.frustumCulled = false
+
     // stop marker: unit ring scaled per tier, subtle 2 Hz pulse in update()
     this.ringMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
@@ -105,7 +128,7 @@ export class SlingshotController {
     this.ring.rotation.x = -Math.PI / 2
     this.ring.position.y = AIM_Y
 
-    this.group.add(this.line, this.ring)
+    this.group.add(this.line, this.bounce, this.ring)
     this.group.visible = false
 
     dom.addEventListener('pointerdown', this.onDown)
@@ -181,6 +204,8 @@ export class SlingshotController {
     this.dom.removeEventListener('pointercancel', this.onUp)
     this.line.geometry.dispose()
     ;(this.line.material as THREE.Material).dispose()
+    this.bounce.geometry.dispose()
+    ;(this.bounce.material as THREE.Material).dispose()
     this.ring.geometry.dispose()
     this.ringMat.dispose()
   }
@@ -279,10 +304,23 @@ export class SlingshotController {
     }
     this.group.visible = true
 
-    // stop marker at origin + dir · predicted, clamped inside the rails
-    const dist = predictStopDistance(d.tier, LAUNCH_POWER)
+    // marker at the FIRST thing the drink meets along the true aim line: a
+    // side rail, the far rail, or the predicted stop — never clamped per axis
+    // (per-axis clamping bent the drawn arrow off the real launch direction)
     const r = d.def.radius
-    const mx = clamp(this.originX + this.dirX * dist, -this.halfW + r, this.halfW - r)
+    const predicted = predictStopDistance(d.tier, LAUNCH_POWER)
+    let dist = predicted
+    let sideHit = false
+    if (Math.abs(this.dirX) > 1e-6) {
+      const wall = this.dirX > 0 ? this.halfW - r : -this.halfW + r
+      const tx = (wall - this.originX) / this.dirX
+      if (tx > 0 && tx < dist) { dist = tx; sideHit = true }
+    }
+    if (this.dirZ < -1e-6) {
+      const tz = (FAR_Z + r - this.originZ) / this.dirZ
+      if (tz > 0 && tz < dist) { dist = tz; sideHit = false }
+    }
+    const mx = this.originX + this.dirX * dist
     const mz = clamp(this.originZ + this.dirZ * dist, FAR_Z + r, NEAR_Z)
     this.ring.position.set(mx, this.yAt(mz) + 0.003, mz)
 
@@ -309,6 +347,36 @@ export class SlingshotController {
     a[10] = my
     a[11] = mz - pz * w1
     this.linePos.needsUpdate = true
+
+    // one-bounce preview: reflect off the side rail and run on to the far
+    // rail (or the remaining predicted slide) — direction only, no speed loss
+    // shown; enough to line up a bank shot on purpose
+    this.bounce.visible = sideHit
+    if (sideHit) {
+      const bx = -this.dirX
+      const bz = this.dirZ
+      let rest = Math.max(0, predicted - dist)
+      if (bz < -1e-6) rest = Math.min(rest, (FAR_Z + r - mz) / bz)
+      if (Math.abs(bx) > 1e-6) {
+        const wall2 = bx > 0 ? this.halfW - r : -this.halfW + r
+        const tx2 = (wall2 - mx) / bx
+        if (tx2 > 0) rest = Math.min(rest, tx2)
+      }
+      const ex = mx + bx * rest
+      const ez = mz + bz * rest
+      const qx = -bz
+      const qz = bx
+      const wA = 0.006
+      const wB = 0.004
+      const b = this.bouncePos.array as Float32Array
+      const ya = this.yAt(mz) + 0.003
+      const yb = this.yAt(ez) + 0.003
+      b[0] = mx + qx * wA; b[1] = ya; b[2] = mz + qz * wA
+      b[3] = mx - qx * wA; b[4] = ya; b[5] = mz - qz * wA
+      b[6] = ex + qx * wB; b[7] = yb; b[8] = ez + qz * wB
+      b[9] = ex - qx * wB; b[10] = yb; b[11] = ez - qz * wB
+      this.bouncePos.needsUpdate = true
+    }
   }
 }
 

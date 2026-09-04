@@ -19,10 +19,11 @@ That's it. `npm run build` emits a static `dist/` folder for any host.
 
 ## Play
 
-- **Press on the drink in the cradle, point where you want it to go, and
-  release** — every push fires at the same strength, so aim is the whole
-  game. The ring on the table shows where it will stop — heavier drinks stop
-  shorter, so watch the marker retreat when a pitcher comes up.
+- **Press anywhere, swipe in the direction you want, release** — every push
+  fires with enough strength to reach the far rail, so aim is the whole game
+  (up to 35° either side). The arrow shows the path and the ring marks the
+  first thing it will hit; after a side rail, a fainter line previews the
+  bank. Heavy drinks plow through what they meet, light ones bounce off.
 - **Three of a kind touching** merge into the next tier. Chains within a
   second multiply ×1.5 per link.
 - Bank shots off the far and side rails are legal. The near edge is open —

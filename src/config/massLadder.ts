@@ -29,35 +29,20 @@ export const MASS_KG: Readonly<Record<number, number>> = {
 }
 
 /**
- * Impulse law: J = PUSH_K * pull01 * m^PUSH_ALPHA.
+ * Launch law (player decision 2026-09-03): EVERY tier reaches the far end.
  *
- * ALPHA 0.92 — ABOVE the briefed 0.5-0.8 band (and above the 0.85 allowance),
- * and it has to be. Stop distance scales as m^(2a-2) / mu_eff, and the ladder
- * harness targets pin both ends AND the middle:
- *   - tier 1 full pull must stop 1.25-1.4 m out (10-20% short of the far rail)
- *   - tier 12 must still cross the midline (>= ~0.85 m)
- *   - stop distances must fall MONOTONICALLY through all 12 tiers
- * Friction is per SoundMaterial (physics/materials.ts), and GLASS backs tiers
- * 4, 5, 6, 9 and 12 — a 9.1x mass span sharing one mu. Within that group the
- * distance ratio is purely (m4/m12)^(2a-2) = 9.09^(2-2a); for tier 4 to land
- * below tier 3 (~1.2 m) while tier 12 still reaches ~0.86 m, 2-2a must be
- * <= ~0.16, i.e. ALPHA >= ~0.92. At the briefed 0.8 (or even 0.85) tier 4
- * would out-slide tier 1 by half a metre or tier 12 would die at ~0.55 m —
- * verified in the ladder harness, not just on paper. The band was written
- * assuming friction could fall freely with tier; the material table can't do
- * that with glass at both ends of the ladder.
+ * Each launch gives the drink exactly the speed whose free slide would stop
+ * TARGET_STOP_M out — a little beyond the far rail (travel from the cradle
+ * to the rail face is ~1.65 m), so an unobstructed drink always arrives with
+ * a modest residual speed, taps the rail and settles; anything it meets on
+ * the way is resolved by the collision (momentum: a 5 kg dispenser at that
+ * speed plows, a 0.2 kg juice box bounces off). The speed is solved per tier
+ * from the friction model in physics/impulse.ts (glass needs slightly less
+ * than paper for the same distance), and the impulse is J = m * v0.
  *
- * Consequences, measured in ?scene=ladder (capture --scene=ladder --state):
- *   - full-pull stops descend ~1.38 -> ~0.86 m; adjacent gaps 2.7-6.2 cm
- *     (biggest low on the ladder where stop distance is the weight-read;
- *     tiers 10-12 differ ~3 cm because up there reluctance-to-move reads the
- *     weight, per the MASS_KG rationale above)
- *   - launch speeds still fall with mass (v ~ m^-0.08 gives 3.0 -> 2.3 m/s),
- *     so heavier drinks read slower AND shorter, just less steeply than the
- *     original band assumed.
- *
- * PUSH_K 2.66 calibrated in the ladder harness: tier 1 full pull stops ~16%
- * short of the far rail, tier 12 crosses the midline by ~8 cm.
+ * What this replaces: a mass-power law J = K * m^0.92 whose stop distances
+ * fell 1.39 -> 0.86 m up the ladder. The player found "nothing reaches the
+ * far end" a worse read than losing the stop-distance weight cue; weight now
+ * reads through collisions (plow vs bounce), launch lean and the clink.
  */
-export const PUSH_ALPHA = 0.92
-export const PUSH_K = 2.66
+export const TARGET_STOP_M = 1.95

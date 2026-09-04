@@ -30,14 +30,14 @@ export const BUDGET_PER_TIER = 2
 export const BUDGET_NO_BASE_MULT = 1.4
 
 /** spawn-director bias while an order for T is active (pool tiers only) */
-export const ORDER_BIAS_T_MINUS_1 = 1.6
+export const ORDER_BIAS_T_MINUS_1 = 2.0
 export const ORDER_BIAS_T_MINUS_2 = 1.25
 
 /** serve sequence: lift, then glide off the left (service) side while shrinking */
-export const SERVE_LIFT_M = 0.06
+export const SERVE_LIFT_M = 0.3
 /** the lift's ease-out-back runs over this window (s), inside the glide */
-export const SERVE_LIFT_S = 0.22
-export const SERVE_GLIDE_S = 0.55
+export const SERVE_LIFT_S = 0.3
+export const SERVE_GLIDE_S = 0.7
 export const SERVE_SHRINK_TO = 0.35
 /** glide target x = −halfW − this (m): past the left rail, onto the service side */
 export const SERVE_SIDE_MARGIN_M = 0.25

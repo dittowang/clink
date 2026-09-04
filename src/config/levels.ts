@@ -85,12 +85,12 @@ export const LEVELS: readonly LevelDef[] = [
   { id: 24, chapter: 4, preset: 'night', pool: [7, 8, 9, 10], goal: { kind: 'makeTier', tier: 12 }, pushes: 60, stars: [16000, 25600, 41600], mods: { wind: { amp: 0.5 } } },
 ]
 
-/** Endless: golden preset, pool 1..5, no push limit, local top-5 leaderboard. */
+/** Endless: golden preset, pool 1..3 to start (orders shift it up), no push limit, local top-5. */
 export const ENDLESS: LevelDef = {
   id: 0,
   chapter: 1,
   preset: 'golden',
-  pool: [1, 2, 3, 4, 5],
+  pool: [1, 2, 3],
   goal: { kind: 'endless' },
   pushes: null,
   stars: [0, 0, 0],

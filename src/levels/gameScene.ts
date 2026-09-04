@@ -543,6 +543,10 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     if (!orders || !orders.current) return
     const r = orders.serve()
     d.state = 'serving'
+    // Rapier 0.19: setEnabled(false) on a KINEMATIC body's collider does NOT
+    // stop it shoving dynamic bodies (verified in captures/tmp/rapier-probe);
+    // empty collision groups do. Keep setEnabled too so no events fire.
+    d.collider.setCollisionGroups(0)
     d.collider.setEnabled(false)
     d.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true)
     serveJob = {
@@ -588,7 +592,10 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     const d = job.drink
     const k = Math.min(1, job.t / SERVE_GLIDE_S)
     const e = k * k * (3 - 2 * k) // smoothstep glide: eases out of rest, into the hand-off
-    const lift = SERVE_LIFT_M * easeOutBack(Math.min(1, job.t / SERVE_LIFT_S))
+    // a waiter's lift: straight up over the crowd (ease-out cubic — the
+    // 30 cm lift clears every tier, an overshoot there would read as a toss)
+    const lk = Math.min(1, job.t / SERVE_LIFT_S)
+    const lift = SERVE_LIFT_M * (1 - Math.pow(1 - lk, 3))
     _tmp.set(job.x0 + (job.toX - job.x0) * e, job.y0 + lift, job.z0)
     d.body.setNextKinematicTranslation(_tmp)
     d.visual.scale.setScalar(1 - (1 - SERVE_SHRINK_TO) * e)

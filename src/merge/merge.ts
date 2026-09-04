@@ -201,6 +201,9 @@ export class MergeSystem {
     const cz = (three[0].currPos.z + three[1].currPos.z + three[2].currPos.z) / 3
     for (const d of three) {
       d.state = 'merging'
+      // Rapier 0.19: a disabled collider on a KINEMATIC body still shoves
+      // dynamic neighbours; empty collision groups actually detach it
+      d.collider.setCollisionGroups(0)
       d.collider.setEnabled(false)
       d.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true)
     }

@@ -82,9 +82,10 @@ export class OrderManager {
   }
 
   /**
-   * Target tier: T_base = FIRST + floor(served / STEP), capped at
+   * Target tier: T_base = FIRST + floor(served / STEP), never below
+   * poolMax + 1 (always at least one merge above what is dealt), capped at
    * min(12, poolMax + headroom); bumped +1 while that tier already stands on
-   * the table (up to 12); never below FIRST.
+   * the table (up to 12).
    */
   targetTier(): TierId {
     const pool = this.pool()
@@ -93,6 +94,9 @@ export class OrderManager {
     const cap = Math.min(ORDER_MAX_TIER, poolMax + ORDER_POOL_HEADROOM)
     let tier = Math.min(cap, ORDER_FIRST_TIER + Math.floor(this.served / ORDER_LADDER_STEP))
     tier = Math.max(ORDER_FIRST_TIER, tier)
+    // an order is always ABOVE the dealt pool: it must take at least one
+    // merge to make — a tier the pool deals directly would serve itself
+    tier = Math.max(tier, Math.min(ORDER_MAX_TIER, poolMax + 1))
     while (tier < ORDER_MAX_TIER && this.onTable(tier as TierId) > 0) tier++
     return tier as TierId
   }

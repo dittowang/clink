@@ -31,20 +31,42 @@ const SEED = Number(args.seed ?? 1)
 const ONLY = args.level ? Number(args.level) : null
 /** seconds of settle after the last shot before the run is judged */
 const SETTLE_S = 14
+/** campaign size: 4 chapters × 6 puzzles (src/config/levels.ts) */
+const LEVEL_COUNT = 24
 
 /**
  * The lessons: what the level is teaching, expressed as a path that must FAIL.
- * `pre` = seconds to wait before the first shot; `shots` in degrees.
- * expect: 'unsolved' (goal not met inside the replay) or 'foul' (game over).
+ * `pre` = seconds to wait before the first shot; `shots` in degrees (or
+ * { angle, waitBefore }); `without` strips those `mods` keys from the level
+ * before the replay (a layout counterfactual — "the same level without the
+ * slick"); `level` overrides the key when one level has several lessons.
+ * expect: 'unsolved' (goal not met inside the replay), 'foul' (game over), or
+ * 'solved' for a paced control replay that must still complete.
  */
 const LESSONS = {
   2: { why: 'straight at the pair stops dead on the pitcher', shots: [-10], expect: 'unsolved' },
-  5: { why: 'a straight shot stops dead on the pole', shots: [0], expect: 'unsolved' },
-  6: { why: 'rail ride and centre lane die on the pitcher', shots: [-12, -9], expect: 'unsolved' },
-  8: { why: 'waiting 12 s: the pair creeps over the line', pre: 12, shots: [0], expect: 'foul' },
-  9: { why: 'straight: bounces off the pitcher, slides the slick over the line', shots: [0], expect: 'foul' },
-  11: { why: 'a straight shot drifts right past the pair', shots: [0], expect: 'unsolved' },
-  '11b': { level: 11, why: 'too far into the wind drops off the open edge', shots: [-25], expect: 'unsolved' },
+  5: { why: '4° off the gap (7°): stops dead on the right pitcher', shots: [7], expect: 'unsolved' },
+  6: { why: 'two straight shots stack at the rail centre — no pair, no merge', shots: [0, 0], expect: 'unsolved' },
+  7: { why: 'a straight shot stops dead on the pole', shots: [0], expect: 'unsolved' },
+  8: { why: 'rail ride and centre lane die on the pitcher', shots: [-12, -9], expect: 'unsolved' },
+  10: { why: 'straight shots stop dead on the pole, twice', shots: [0, 0], expect: 'unsolved' },
+  11: { why: 'hitting a wall can just shoves it — the pair stays walled off', shots: [-4], expect: 'unsolved' },
+  12: { why: 'wide of the pole (−8°): the cola forms 9 cm from the pair, no chain', shots: [-8], expect: 'unsolved' },
+  13: { why: 'waiting 12 s: the pair creeps over the line', pre: 12, shots: [0], expect: 'foul' },
+  14: { why: 'straight: bounces off the pitcher, slides the slick over the line', shots: [0], expect: 'foul' },
+  16: { why: 'first pair on time, then 12 s of dawdling: the second pair fouls', shots: [22, { angle: -22, waitBefore: 12 }], expect: 'foul' },
+  17: { why: 'the same table without the slick: the runner stops 19 cm short', without: ['wetPatch'], shots: [0], expect: 'unsolved' },
+  // the bare replay fires a hand in ~2.4 s; a slow player aims for ~5 s per shot
+  18: { why: 'a 5 s aiming pace: the first bottle made slides over the line before the third shot', shots: [-20, { angle: 24, waitBefore: 5 }, { angle: 11, waitBefore: 5 }], expect: 'foul' },
+  '18b': { level: 18, why: 'a 3 s aiming pace still solves it (control, must NOT fail)', shots: [-20, { angle: 24, waitBefore: 3 }, { angle: 11, waitBefore: 3 }], expect: 'solved' },
+  19: { why: 'a straight shot drifts right past the pair', shots: [0], expect: 'unsolved' },
+  '19b': { level: 19, why: 'too far into the wind drops off the open edge', shots: [-25], expect: 'unsolved' },
+  21: { why: 'a straight shot drifts left past the pair', shots: [0], expect: 'unsolved' },
+  '21b': { level: 21, why: 'too far into the wind drops off the open right edge', shots: [25], expect: 'unsolved' },
+  22: { why: 'straight: the wind carries the can off the runner', shots: [0], expect: 'unsolved' },
+  23: { why: 'shooting into the opening gust (2 s): drifts 18 cm wide', shots: [{ angle: 0, waitBefore: 2 }], expect: 'unsolved' },
+  '23b': { level: 23, why: 'shooting into the 12 s peak: blown off the open edge', shots: [{ angle: 0, waitBefore: 12 }], expect: 'unsolved' },
+  24: { why: 'straight stops dead on the pitcher', shots: [0], expect: 'unsolved' },
 }
 
 function startServer() {
@@ -129,13 +151,24 @@ async function main() {
 
   const rows = []
   let failed = 0
-  const load = async (level) => {
-    await page.goto(`http://localhost:${PORT}/?harness=1&scene=game&level=${level}&seed=${SEED}&quality=low`)
-    await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 })
-    return page.evaluate(() => window.__game.levelDef(window.__game.state().level))
+  const load = async (level, without = []) => {
+    // SwiftShader's first-frame JIT can blow the default 30 s navigation
+    // timeout on a loaded machine — the run must not fail on that
+    await page.goto(`http://localhost:${PORT}/?harness=1&scene=game&level=${level}&seed=${SEED}&quality=low`, { timeout: 120000 })
+    await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 })
+    return page.evaluate((without) => {
+      const g = window.__game
+      const def = g.levelDef(g.state().level)
+      if (def && without.length) {
+        const mods = { ...(def.mods ?? {}) }
+        for (const k of without) delete mods[k]
+        g.loadLevelDef({ ...def, mods })
+      }
+      return def
+    }, without)
   }
 
-  const levels = ONLY !== null ? [ONLY] : Array.from({ length: 12 }, (_, i) => i + 1)
+  const levels = ONLY !== null ? [ONLY] : Array.from({ length: LEVEL_COUNT }, (_, i) => i + 1)
   for (const level of levels) {
     const def = await load(level)
     if (!def || !def.solution) {
@@ -157,16 +190,17 @@ async function main() {
     for (const [key, L] of Object.entries(LESSONS)) {
       const level = L.level ?? Number(key)
       if (ONLY !== null && level !== ONLY) continue
-      await load(level)
+      await load(level, L.without ?? [])
       const r = await replay(page, { shots: L.shots, pre: L.pre, settleS: SETTLE_S })
       const solved = r.outcome === 'complete'
-      const ok = L.expect === 'foul' ? r.fouled && !solved : !solved
+      // expect 'solved' is a paced CONTROL replay: the same level must still solve
+      const ok = L.expect === 'solved' ? solved : L.expect === 'foul' ? r.fouled && !solved : !solved
       if (!ok) failed++
       rows.push([
         `L${level} ${L.why}`,
         String(r.pushes),
         '-',
-        `${L.pre ? `wait ${L.pre}s, ` : ''}${JSON.stringify(L.shots)}`,
+        `${L.without ? `no ${L.without.join('/')}, ` : ''}${L.pre ? `wait ${L.pre}s, ` : ''}${JSON.stringify(L.shots)}`,
         ok ? `ok  ${r.outcome}${r.fouled ? ' (foul)' : ''}` : `FAIL solved=${solved} outcome=${r.outcome}`,
       ])
     }

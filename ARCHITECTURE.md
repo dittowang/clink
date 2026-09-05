@@ -180,7 +180,7 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
   `--audio=smoke` (real-time gesture + context check).
 
 ### src/levels — game scene, director, HUD, menus, persistence
-- Owns `createGameScene`, level defs (4 chapters × 3 hand-designed PUZZLES +
+- Owns `createGameScene`, level defs (4 chapters × 6 hand-designed PUZZLES +
   endless — docs/GAME.md), spawn director (Endless: weighted pool, rubber
   band ±20–40%; puzzles deal a fixed `queue` instead), HUD (HTML overlay,
   strings via `t()`), score pops via `Vector3.project`, localStorage

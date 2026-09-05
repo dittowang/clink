@@ -2,13 +2,23 @@ import { type Locale, detectLocale } from '../core/strings'
 import { levelById } from '../config/levels'
 
 /**
- * Persistence — localStorage `clink.save.v1`, exactly the shape docs/GAME.md
+ * Persistence — localStorage `clink.save.v2`, exactly the shape docs/GAME.md
  * allows and NOTHING else: { stars, endless top-5 (+ parallel orders-served
  * counts), locale, muted }.
  * Loaded once at boot; persisted on level end and on settings change.
+ *
+ * v1 → v2 (the 24-level campaign): level ids were renumbered when each
+ * chapter grew to six puzzles, so a v1 record's stars no longer name the
+ * same levels — they are REMAPPED through LEGACY_ID_MAP (the twelve original
+ * layouts are unchanged); the Endless leaderboard, locale and mute carry over. The v1 key is left in place (harmless, never re-read
+ * once v2 exists).
  */
 
-export const SAVE_KEY = 'clink.save.v1'
+export const SAVE_KEY = 'clink.save.v2'
+/** the 12-level campaign's key: read once, stars discarded */
+export const LEGACY_SAVE_KEY = 'clink.save.v1'
+/** v1 level id → v2 level id (the 12 original puzzles kept their layouts) */
+const LEGACY_ID_MAP: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 7, 6: 8, 7: 9, 8: 13, 9: 14, 10: 15, 11: 19, 12: 20 }
 
 export interface SaveData {
   /** levelId → stars earned (0–3); absent = never completed */
@@ -27,15 +37,22 @@ function fresh(): SaveData {
 
 export function loadSave(): SaveData {
   try {
-    const raw = localStorage.getItem(SAVE_KEY)
+    let raw = localStorage.getItem(SAVE_KEY)
+    let legacy = false
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_SAVE_KEY)
+      legacy = true
+    }
     if (!raw) return fresh()
     const p = JSON.parse(raw) as Partial<SaveData>
     const out = fresh()
     if (p.stars && typeof p.stars === 'object') {
       for (const [k, v] of Object.entries(p.stars)) {
-        const id = Number(k)
+        const rawId = Number(k)
         const s = Number(v)
-        // ids that no longer exist (the pre-puzzle 24-level campaign) are dropped
+        // a v1 (12-level) record names the same layouts under old ids —
+        // migrate them instead of making the player re-solve the chapter
+        const id = legacy ? (LEGACY_ID_MAP[rawId] ?? -1) : rawId
         if (Number.isInteger(id) && id > 0 && levelById(id) && s >= 0 && s <= 3) out.stars[id] = s
       }
     }
@@ -69,6 +86,7 @@ export function persistSave(save: SaveData): void {
 export function wipeSave(): void {
   try {
     localStorage.removeItem(SAVE_KEY)
+    localStorage.removeItem(LEGACY_SAVE_KEY)
   } catch {
     /* ignore */
   }

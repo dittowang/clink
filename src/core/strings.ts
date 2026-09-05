@@ -38,7 +38,7 @@ const TABLE = {
   on:               { en: 'On', 'zh-CN': '开' },
   off:              { en: 'Off', 'zh-CN': '关' },
   language:         { en: 'Language', 'zh-CN': '语言' },
-  chapterLocked:    { en: 'Solve chapter {n} to unlock', 'zh-CN': '通关第 {n} 章解锁' },
+  chapterLocked:    { en: 'Solve 4 puzzles of chapter {n} to unlock', 'zh-CN': '解开第 {n} 章的 4 关即可解锁' },
   levelFailed:      { en: 'Out of Pushes', 'zh-CN': '推动次数用完' },
   back:             { en: 'Back', 'zh-CN': '返回' },
   foulWarn:         { en: 'Over the line!', 'zh-CN': '越线警告！' },

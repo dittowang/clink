@@ -35,9 +35,9 @@ That's it. `npm run build` emits a static `dist/` folder for any host.
   drinks that go over are lost to the sand.
 - A drink resting across the **foul line** for a couple of seconds ends the
   run.
-- Four chapters (morning → noon → golden hour → night) of three hand-designed
+- Four chapters (morning → noon → golden hour → night) of six hand-designed
   puzzles each — a fixed hand of drinks, a layout, a par — plus Endless.
-  Solving all three puzzles of a chapter unlocks the next.
+  Solving four puzzles of a chapter unlocks the next.
 
 ## Tech notes
 

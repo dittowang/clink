@@ -429,7 +429,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     stage.scene.add(dressing.group)
     if (mods.umbrella) world.addPole(mods.umbrella.x, mods.umbrella.z, 0.022)
     if (mods.wind) {
-      windField = new WindField(levelSeed(baseSeed, def.id) ^ 0x5eed, mods.wind.amp, mods.wind.steady === true)
+      windField = new WindField(levelSeed(baseSeed, def.id) ^ 0x5eed, mods.wind.amp, mods.wind.steady === true, mods.wind.dir ?? 1)
       windDrift = new WindDrift(SURFACE_Y)
       stage.scene.add(windDrift.points)
     }

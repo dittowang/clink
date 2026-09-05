@@ -10,8 +10,9 @@ import * as THREE from 'three'
  * lattice. Per fixed step the level scene applies
  *   F = amp · WIND_PRESSURE · frontalArea(2·r·h) · gust(t)
  * to every awake dynamic drink. Purely a function of (seed, t): replays and
- * harness runs reproduce gusts exactly. A STEADY field (L11 crosswind) is
- * the degenerate case: gust ≡ 1, direction +X, no wander — a constant push.
+ * harness runs reproduce gusts exactly. A STEADY field (the crosswind /
+ * headwind lessons) is the degenerate case: gust ≡ 1, direction ±X
+ * (`steadyDir`, +X by default), no wander — a constant push.
  *
  * WindDrift — the VISUAL side: pooled sand-streak particles blown across the
  * table, spawn rate ∝ gust strength. Render-only; Math.random here never
@@ -49,17 +50,22 @@ export class WindField {
   constructor(
     private readonly seed: number,
     readonly amp: number,
-    /** constant full-strength wind toward +X (no gust noise, no wander) */
-    readonly steady = false
+    /** constant full-strength wind along X (no gust noise, no wander) */
+    readonly steady = false,
+    /** sign of the steady wind's X direction (+1 = toward +X) */
+    readonly steadyDir: -1 | 1 = 1
   ) {
     this.baseSign = hash01(seed, 9999) < 0.5 ? -1 : 1
-    if (steady) this.strength01 = 1
+    if (steady) {
+      this.strength01 = 1
+      this.dirX = steadyDir
+    }
   }
 
   update(t: number): void {
     if (this.steady) {
       this.strength01 = 1
-      this.dirX = 1
+      this.dirX = this.steadyDir
       this.dirZ = 0
       return
     }

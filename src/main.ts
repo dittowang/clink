@@ -25,7 +25,7 @@ export interface BootCtx {
 }
 
 async function boot(): Promise<void> {
-  // locale persistence lives in clink.save.v1 (applied when the game scene
+  // locale persistence lives in clink.save.v2 (applied when the game scene
   // loads its save); boot just picks the browser default for debug scenes
   setLocale(detectLocale())
 

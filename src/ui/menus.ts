@@ -127,14 +127,23 @@ export function createMenus(cb: MenuCallbacks): Menus {
     const p = el(
       'div',
       'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;' +
-        `justify-content:center;gap:14px;background:rgba(6,16,26,${dim});color:#fff;` +
-        'text-align:center;overflow-y:auto;padding:24px 16px;' +
+        `background:rgba(6,16,26,${dim});color:#fff;` +
+        'text-align:center;overflow-y:auto;padding:24px 16px;box-sizing:border-box;' +
         'opacity:0;transition:opacity .28s ease-out;'
     )
+    // the content column centres itself with auto margins rather than
+    // justify-content:center: a column taller than the viewport (the 24-level
+    // chapter select on a phone) then scrolls from its top instead of having
+    // its head and its Back button clipped off both ends
+    const col = el(
+      'div',
+      'margin:auto;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:14px;'
+    )
+    p.appendChild(col)
     root.appendChild(p)
     // fade every panel in — a full-opacity same-frame appearance reads as a cut
     requestAnimationFrame(() => { p.style.opacity = '1' })
-    return p
+    return col
   }
 
   function starRow(stars: number, size: number, stagger: boolean): HTMLDivElement {
@@ -230,13 +239,14 @@ export function createMenus(cb: MenuCallbacks): Menus {
         head.appendChild(el('div', 'font-size:13px;opacity:.85;', t('chapterLocked', { n: ch - 1 })))
       }
       card.appendChild(head)
-      // one row of three: number + name + stars per puzzle
-      const grid = el('div', 'display:flex;gap:8px;margin-top:10px;')
+      // six puzzles per chapter as a 3 × 2 grid (three columns keep the names
+      // legible on a 375 px phone): number + name + stars per puzzle
+      const grid = el('div', 'display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;')
       for (const lv of levelsOfChapter(ch)) {
         const stars = save.stars[lv.id] ?? 0
         const cell = el(
           'button',
-          'flex:1;min-width:0;height:64px;padding:0 6px;border:none;border-radius:12px;font-family:inherit;' +
+          'min-width:0;height:60px;padding:0 6px;border:none;border-radius:12px;font-family:inherit;' +
             'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;' +
             `background:${stars > 0 ? 'rgba(255,206,84,.2)' : 'rgba(255,255,255,.12)'};color:#fff;` +
             `cursor:${locked ? 'default' : 'pointer'};`

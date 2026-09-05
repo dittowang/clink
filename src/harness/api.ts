@@ -20,13 +20,13 @@ export interface HarnessApi {
   /** stop-distance log for the ladder scene, metres from launch */
   logs?(): unknown
   // ---- game-scene extensions (additive; absent on debug scenes) ----
-  /** load a campaign puzzle (1..12) or endless (0) in place */
+  /** load a campaign puzzle (1..24) or endless (0) in place */
   loadLevel?(id: number): void
   /** QA: load an ad-hoc LevelDef in place (puzzle tuning without a rebuild) */
   loadLevelDef?(def: unknown): void
   /** snapshot of the persisted save (stars, endless top-5, locale, muted) */
   save?(): unknown
-  /** QA: clear clink.save.v1 and the in-memory stars/leaderboard */
+  /** QA: clear clink.save.v2 and the in-memory stars/leaderboard */
   wipeSave?(): void
   /** Endless orders: the active card + run tallies (null outside Endless) */
   order?(): {

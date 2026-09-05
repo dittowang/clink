@@ -106,7 +106,10 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
 
 ### src/physics — world, slingshot, feel
 - `PhysicsWorld` wraps RAPIER.World (timestep 1/120, CCD on launched body),
-  creates table/rail/umbrella colliders, spawns/removes drink bodies
+  creates table/rail/umbrella colliders (the wet patch is a FRICTION ZONE,
+  not a collider: drinks inside it get μ 0.03 with the Min combine rule — a
+  1.5 mm strip on the plank was a curb that stopped launched cans dead),
+  spawns/removes drink bodies
   (cylinder colliders, `setEnabledRotations(false, true, false)`,
   `setAdditionalMass` from the ladder), steps with EventQueue and drains
   collision + contact-force events into the bus.
@@ -177,9 +180,13 @@ Launch cradle at z = CRADLE_Z. Rails: far + both sides; near edge OPEN.
   `--audio=smoke` (real-time gesture + context check).
 
 ### src/levels — game scene, director, HUD, menus, persistence
-- Owns `createGameScene`, level defs (4 chapters × 6 + endless), spawn
-  director (weighted pool, rubber band ±20–40%), HUD (HTML overlay, strings
-  via `t()`), score pops via `Vector3.project`, localStorage persistence.
+- Owns `createGameScene`, level defs (4 chapters × 3 hand-designed PUZZLES +
+  endless — docs/GAME.md), spawn director (Endless: weighted pool, rubber
+  band ±20–40%; puzzles deal a fixed `queue` instead), HUD (HTML overlay,
+  strings via `t()`), score pops via `Vector3.project`, localStorage
+  persistence. Every puzzle's `solution` is replayed by `npm run puzzles`
+  (scripts/puzzles.mjs): goal met within par, no foul; `--lessons` replays
+  the documented failure paths too.
 - **Orders (Endless pacing)** — `src/levels/orders.ts` (ladder, budgets,
   pool shift, seeded junk toss) + every constant in `src/config/orders.ts`.
   One active order ("serve one drink of tier T"); a T at rest on the table

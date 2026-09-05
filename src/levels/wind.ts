@@ -10,7 +10,8 @@ import * as THREE from 'three'
  * lattice. Per fixed step the level scene applies
  *   F = amp · WIND_PRESSURE · frontalArea(2·r·h) · gust(t)
  * to every awake dynamic drink. Purely a function of (seed, t): replays and
- * harness runs reproduce gusts exactly.
+ * harness runs reproduce gusts exactly. A STEADY field (L11 crosswind) is
+ * the degenerate case: gust ≡ 1, direction +X, no wander — a constant push.
  *
  * WindDrift — the VISUAL side: pooled sand-streak particles blown across the
  * table, spawn rate ∝ gust strength. Render-only; Math.random here never
@@ -47,12 +48,21 @@ export class WindField {
 
   constructor(
     private readonly seed: number,
-    readonly amp: number
+    readonly amp: number,
+    /** constant full-strength wind toward +X (no gust noise, no wander) */
+    readonly steady = false
   ) {
     this.baseSign = hash01(seed, 9999) < 0.5 ? -1 : 1
+    if (steady) this.strength01 = 1
   }
 
   update(t: number): void {
+    if (this.steady) {
+      this.strength01 = 1
+      this.dirX = 1
+      this.dirZ = 0
+      return
+    }
     // two octaves of smooth noise; shaped so lulls are real lulls
     const n = 0.65 * valueNoise(this.seed, t, 5.0, 0x1111) + 0.35 * valueNoise(this.seed, t, 2.3, 0x2222)
     this.strength01 = n * n * (3 - 2 * n) // smoothstep: spends time near 0 and 1

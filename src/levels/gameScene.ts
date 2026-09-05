@@ -2,11 +2,11 @@ import * as THREE from 'three'
 import type { BootCtx, SceneHandle } from '../main'
 import { TABLE, SURFACE_Y, NEAR_Z, CRADLE_Z, FOUL_Z, FOUL_GRACE_S, SETTLE_SPEED } from '../config/table'
 import { TIERS, type TierId } from '../config/tiers'
-import { levelById, levelSeed, LEVELS, starsToUnlockChapter, type LevelDef } from '../config/levels'
+import { levelById, levelSeed, LEVELS, pushBudget, isChapterUnlocked, puzzleStars, type LevelDef } from '../config/levels'
 import { bus } from '../core/events'
 import { Rng, seedFromUrl } from '../core/rng'
 import { resetDrinkIds, type Drink } from '../core/drink'
-import { t, tierName, setLocale, getLocale } from '../core/strings'
+import { t, tierName, levelName, setLocale, getLocale } from '../core/strings'
 import { PhysicsWorld } from '../physics/world'
 import { applyLaunch, launchImpulse } from '../physics/impulse'
 import { applyInterpolatedPose } from '../physics/interpolate'
@@ -41,16 +41,20 @@ import RAPIER from '@dimforge/rapier3d-compat'
 import { SandPuff } from './sandPuff'
 import { WindField, WindDrift } from './wind'
 import { createDressing, type Dressing } from './dressing'
-import { loadSave, persistSave, wipeSave, recordLevelStars, recordEndlessScore, totalStars } from './save'
+import { loadSave, persistSave, wipeSave, recordLevelStars, recordEndlessScore } from './save'
 import { createHud } from '../ui/hud'
 import { createMenus } from '../ui/menus'
 import { createLoadingOverlay } from '../ui/loading'
 
 /**
- * The playable game scene — the full docs/GAME.md game: 24 levels + endless
+ * The playable game scene — the full docs/GAME.md game: 12 puzzles + endless
  * around the verified core turn loop (spawn drop → aim → launch → clinks +
  * merges with chain ×1.5 → next drink on settle-or-timeout; foul past FOUL_Z
  * ends the run; the open near edge eats drinks into the sand).
+ *
+ * Puzzles deal a FIXED hand (def.queue) instead of the director's stream:
+ * the hand's length is the push budget, the tray shows the next queued drink
+ * and goes empty with the last one, and stars come from pushes used vs par.
  *
  * One stage/slingshot/HUD/menu layer lives for the whole session; each level
  * rebuilds the physics world, table visuals, dressing (umbrella, string
@@ -182,7 +186,11 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   let pushesLeft: number | null = null
   let awaitingFinal = false
   let maxTierMade = 0
+  /** merges that produced the mergeCount goal's tier */
+  let goalTierMade = 0
   let earnedStars = 0
+  /** puzzle hand: cards dealt so far (TurnManager draws two up front) */
+  let dealt = 0
   let seqT = 0 // drives the foul rise-tilt AND the complete drift-in
   // end-sequence camera pose: BOTH position and orientation blend from the
   // base pose to this — a raw lookAt() on frame 0 was a visible camera cut
@@ -279,27 +287,46 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     switch (g.kind) {
       case 'makeTier':
         return t('goalMakeTier', { tier: tierName(g.tier) })
-      case 'score':
-        return def.pushes !== null
-          ? t('goalScoreIn', { n: g.score, m: def.pushes })
-          : t('goalScore', { n: g.score })
-      case 'survive':
-        return t('goalSurvive', { n: g.pushes })
+      case 'mergeCount':
+        return t('goalMergeCount', { n: g.count, tier: tierName(g.tier) })
       case 'endless':
         return t('endless')
     }
   }
 
+  /** objective chip: "<name> · <goal> · par N" for puzzles */
+  function objectiveText(): string | null {
+    if (def.goal.kind === 'endless') return null
+    const parts = [levelName(def), goalText()]
+    if (def.par !== undefined) parts.push(t('par', { n: def.par }))
+    return parts.join(' · ')
+  }
+
   function computeStars(): number {
     if (def.goal.kind === 'endless') return 0
-    let s = 1
-    if (score >= def.stars[1]) s++
-    if (score >= def.stars[2]) s++
-    return s
+    return puzzleStars(def, usedPushes)
   }
 
   function chapterUnlocked(ch: number): boolean {
-    return totalStars(save) >= starsToUnlockChapter(ch)
+    return isChapterUnlocked(ch, save.stars)
+  }
+
+  /**
+   * The puzzle hand: TurnManager draws the cradle + tray drinks up front and
+   * one more per launch. Past the end of the hand the draw repeats the last
+   * card (the TurnManager needs a tier), but `handHasNext()` is false so the
+   * tray shows nothing and no spawn ever happens — the budget ran out first.
+   */
+  function drawCard(): TierId {
+    const q = def.queue
+    if (!q) return director.draw()
+    const i = dealt++
+    return q[Math.min(i, q.length - 1)]
+  }
+
+  /** true while the tray drink (turn.nextTier) is a real card of the hand */
+  function handHasNext(): boolean {
+    return !def.queue || dealt - 1 < def.queue.length
   }
 
   function resumeTarget(): number {
@@ -357,8 +384,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     world.dispose()
   }
 
-  function loadLevel(id: number): void {
-    const nextDef = levelById(id) ?? levelById(0)!
+  function loadLevel(id: number, override?: LevelDef): void {
+    const nextDef = override ?? levelById(id) ?? levelById(0)!
     unloadLevel()
     def = nextDef
     const mods = def.mods ?? {}
@@ -374,7 +401,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     mergeSurface.yAt = (z) => world.surfaceYAt(z)
     merge = new MergeSystem(world, bus, { attach, remove })
     director = new SpawnDirector(rng, def.pool, world)
-    turn = new TurnManager(() => director.draw())
+    dealt = 0
+    turn = new TurnManager(drawCard)
 
     stage.setPreset(def.preset)
     stage.rebuildTable({
@@ -390,7 +418,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     stage.scene.add(dressing.group)
     if (mods.umbrella) world.addPole(mods.umbrella.x, mods.umbrella.z, 0.022)
     if (mods.wind) {
-      windField = new WindField(levelSeed(baseSeed, def.id) ^ 0x5eed, mods.wind.amp)
+      windField = new WindField(levelSeed(baseSeed, def.id) ^ 0x5eed, mods.wind.amp, mods.wind.steady === true)
       windDrift = new WindDrift(SURFACE_Y)
       stage.scene.add(windDrift.points)
     }
@@ -410,15 +438,16 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     usedPushes = 0
     awaitingFinal = false
     maxTierMade = 0
+    goalTierMade = 0
     earnedStars = 0
     seqT = 0
     pendingEndMenu = null
     hud.setFoulWarning(false)
-    pushesLeft = def.goal.kind === 'survive' ? def.goal.pushes : def.pushes
+    pushesLeft = pushBudget(def)
 
     hud.setScore(0)
     hud.setPushes(pushesLeft)
-    hud.setObjective(def.goal.kind === 'endless' ? null : goalText(), false)
+    hud.setObjective(objectiveText(), false)
 
     // reset any sequence camera motion
     stage.camera.position.copy(camBasePos)
@@ -461,7 +490,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     log('levelComplete', { level: def.id, stars: earnedStars, score })
     menuScreen = 'end'
     menus.setPauseButtonVisible(false)
-    menus.showLevelComplete({ level: def, stars: earnedStars, score, nextId: nextPlayableId() })
+    menus.showLevelComplete({ level: def, stars: earnedStars, score, pushes: usedPushes, nextId: nextPlayableId() })
   }
 
   function doFail(): void {
@@ -807,7 +836,9 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       trayGroup.remove(trayDrink)
       for (const m of trayLiquidMats) m.dispose()
       trayLiquidMats = []
+      trayDrink = null
     }
+    if (!handHasNext()) return // last card of the hand is in the cradle: empty tray
     const inst = instantiateDrink(turn.nextTier)
     inst.group.traverse((o) => {
       if (o instanceof THREE.Mesh) o.castShadow = true
@@ -1037,7 +1068,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       persistSave(save)
       hud.relabel()
       if (outcome === 'playing') {
-        hud.setObjective(def.goal.kind === 'endless' ? null : goalText(), goalDone)
+        hud.setObjective(objectiveText(), goalDone)
         hud.setPushes(pushesLeft)
       }
     },
@@ -1071,15 +1102,16 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       hud.pop(label, e.centroid, stage.camera)
       bus.emit('scoreChange', { score, delta: e.score, worldPos: e.centroid })
       if (e.tier > maxTierMade) maxTierMade = e.tier
-      if (outcome !== 'playing' || goalDone) return
       const g = def.goal
+      if (g.kind === 'mergeCount' && e.tier === g.tier) goalTierMade++
+      if (outcome !== 'playing' || goalDone) return
       if (
         (g.kind === 'makeTier' && e.tier >= g.tier) ||
-        (g.kind === 'score' && score >= g.score)
+        (g.kind === 'mergeCount' && goalTierMade >= g.count)
       ) {
         goalDone = true
         completeAt = world.time + COMPLETE_DELAY_S
-        hud.setObjective(goalText(), true)
+        hud.setObjective(objectiveText(), true)
       }
     })
   )
@@ -1279,13 +1311,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
 
         const action = turn.update(dt, settled)
         if (action === 'spawn') {
-          const g = def.goal
-          if (g.kind === 'survive' && usedPushes >= g.pushes) {
-            goalDone = true
-            hud.setObjective(goalText(), true)
-            doComplete()
-          } else if (g.kind !== 'survive' && g.kind !== 'endless' && pushesLeft !== null && pushesLeft <= 0 && !goalDone) {
-            awaitingFinal = true // resolve on true settle, not the turn timeout
+          if (pushesLeft !== null && pushesLeft <= 0 && !goalDone) {
+            awaitingFinal = true // hand exhausted: resolve on true settle, not the turn timeout
           } else {
             spawnCradle()
           }
@@ -1397,16 +1424,16 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       paused,
       gameOver: outcome === 'foul',
       pushesLeft,
+      pushesUsed: usedPushes,
+      par: def.par ?? null,
       stars: earnedStars,
       goalProgress: (() => {
         const g = def.goal
         switch (g.kind) {
           case 'makeTier':
             return { kind: g.kind, target: g.tier, value: maxTierMade, done: goalDone }
-          case 'score':
-            return { kind: g.kind, target: g.score, value: score, done: goalDone }
-          case 'survive':
-            return { kind: g.kind, target: g.pushes, value: usedPushes, done: goalDone }
+          case 'mergeCount':
+            return { kind: g.kind, target: g.count, value: goalTierMade, done: goalDone }
           case 'endless':
             return { kind: g.kind, target: null, value: score, done: false }
         }
@@ -1428,6 +1455,16 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     /** ring buffer (120) of impact events with horizontal-force breakdown */
     impacts: () => impactSamples.slice(),
     loadLevel: (id: number): void => loadLevel(id),
+    /**
+     * QA: load an ad-hoc level definition in place (puzzle tuning — vary a
+     * layout without a rebuild). Same lifecycle as loadLevel; id 0 is refused.
+     */
+    loadLevelDef: (custom: LevelDef): void => {
+      if (custom.id === 0) return
+      loadLevel(custom.id, custom)
+    },
+    /** QA: the level definition table entry (null for unknown ids) */
+    levelDef: (id: number): LevelDef | null => levelById(id),
     save: () => JSON.parse(JSON.stringify(save)) as unknown,
     wipeSave: (): void => {
       wipeSave()

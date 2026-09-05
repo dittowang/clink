@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "capture": "node scripts/capture.mjs"
+    "capture": "node scripts/capture.mjs",
+    "puzzles": "node scripts/puzzles.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.0",

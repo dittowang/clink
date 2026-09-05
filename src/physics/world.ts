@@ -45,14 +45,22 @@ export interface WorldMods {
   slopeDeg?: number
   /** omit these side rail colliders (their handles become -1) */
   removeRails?: ('left' | 'right')[]
-  /** thin low-friction strip ON the plank, centre (x,z), extents w × l */
+  /** low-friction zone of the plank, centre (x,z), extents w × l */
   wetPatch?: { x: number; z: number; w: number; l: number }
 }
 
-/** wet varnish: Min combine rule beats the drink's Average, so μ_eff = this */
+/**
+ * Wet varnish. The patch is a FRICTION ZONE, not a collider: a drink whose
+ * footprint centre is inside it gets its own collider friction set to this
+ * with the Min combine rule (beats the plank's Average → μ_eff = 0.03), and
+ * its material friction + Average rule back when it leaves. The earlier
+ * 1.5 mm strip collider ON the plank was a curb — a can arriving at launch
+ * speed hit its vertical edge and stopped dead (puzzle L9 verification,
+ * 2026-09-05) — while a flush strip would have split the normal load with
+ * the plank unpredictably. On sloped tables (tan 3° ≈ 0.052 > 0.03) drinks
+ * inside the zone genuinely slide.
+ */
 const WET_FRICTION = 0.03
-/** wet strip collider half-thickness (1.5 mm strip on the plank) */
-const WET_HALF_T = 0.00075
 
 /** ~2 N: a juice box set down gently is right at the edge of audibility. */
 const CONTACT_FORCE_THRESHOLD = 2
@@ -117,8 +125,10 @@ export class PhysicsWorld {
   /** -1 where the rail was removed by a level modifier */
   readonly sideRailHandles: [number, number]
   readonly sandHandle: number
-  /** handle of the wet-patch strip, or -1 when the level has none */
-  readonly wetPatchHandle: number = -1
+  /** the wet zone's bounds (table space), or null when the level has none */
+  readonly wetPatch: { x: number; z: number; hw: number; hl: number } | null
+  /** collider handles currently carrying the wet friction override */
+  private readonly wetHandles = new Set<number>()
 
   /** effective playfield half-width (levels may narrow the table) */
   readonly halfW: number
@@ -272,25 +282,31 @@ export class PhysicsWorld {
       SAND.restitution,
       'sand'
     )
-    // wet patch: 1.5 mm low-friction strip ON the plank. Min combine rule
-    // beats the drink's Average, so μ_eff = WET_FRICTION — on sloped tables
-    // (tan 2.5° ≈ 0.044 > 0.03) drinks parked on it genuinely slide.
-    if (mods.wetPatch) {
-      const wp = mods.wetPatch
-      const desc = tilt(
-        RAPIER.ColliderDesc.cuboid(wp.w / 2, WET_HALF_T, wp.l / 2),
-        wp.x,
-        SURFACE_Y + WET_HALF_T,
-        wp.z
-      )
-        .setFriction(WET_FRICTION)
-        .setRestitution(TABLE_WOOD.restitution)
-        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
-        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Average)
-      const col = this.raw.createCollider(desc)
-      const t = col.translation()
-      this.statics.set(col.handle, { label: 'wood', pos: new THREE.Vector3(t.x, t.y, t.z) })
-      this.wetPatchHandle = col.handle
+    // wet patch: a friction zone (see WET_FRICTION) applied per drink in step()
+    this.wetPatch = mods.wetPatch
+      ? { x: mods.wetPatch.x, z: mods.wetPatch.z, hw: mods.wetPatch.w / 2, hl: mods.wetPatch.l / 2 }
+      : null
+  }
+
+  /** true when (x, z) lies inside the wet zone */
+  isWet(x: number, z: number): boolean {
+    const wp = this.wetPatch
+    return wp !== null && Math.abs(x - wp.x) < wp.hw && Math.abs(z - wp.z) < wp.hl
+  }
+
+  /** swap a drink's contact friction in/out of the wet override as it crosses the zone edge */
+  private updateWet(d: Drink): void {
+    const inside = this.isWet(d.currPos.x, d.currPos.z)
+    const h = d.collider.handle
+    if (inside === this.wetHandles.has(h)) return
+    if (inside) {
+      this.wetHandles.add(h)
+      d.collider.setFriction(WET_FRICTION)
+      d.collider.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
+    } else {
+      this.wetHandles.delete(h)
+      d.collider.setFriction(MATERIALS[d.def.material].friction)
+      d.collider.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Average)
     }
   }
 
@@ -416,6 +432,7 @@ export class PhysicsWorld {
   removeDrink(drink: Drink): void {
     const handle = drink.collider.handle
     this.byCollider.delete(handle)
+    this.wetHandles.delete(handle)
     const i = this.all.indexOf(drink)
     if (i >= 0) this.all.splice(i, 1)
     // purge stale pairs involving this collider (compact-id decode)
@@ -470,6 +487,7 @@ export class PhysicsWorld {
       const q = d.body.rotation()
       d.currRot.set(q.x, q.y, q.z, q.w)
       d.speed = d.currPos.distanceTo(d.prevPos) * inv
+      if (this.wetPatch) this.updateWet(d)
       if (d.speed > 0.02) {
         slidingSpeed += d.speed
         slidingCount++

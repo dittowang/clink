@@ -1,4 +1,5 @@
 import { type Locale, detectLocale } from '../core/strings'
+import { levelById } from '../config/levels'
 
 /**
  * Persistence — localStorage `clink.save.v1`, exactly the shape docs/GAME.md
@@ -34,7 +35,8 @@ export function loadSave(): SaveData {
       for (const [k, v] of Object.entries(p.stars)) {
         const id = Number(k)
         const s = Number(v)
-        if (Number.isInteger(id) && s >= 0 && s <= 3) out.stars[id] = s
+        // ids that no longer exist (the pre-puzzle 24-level campaign) are dropped
+        if (Number.isInteger(id) && id > 0 && levelById(id) && s >= 0 && s <= 3) out.stars[id] = s
       }
     }
     if (Array.isArray(p.endless)) {

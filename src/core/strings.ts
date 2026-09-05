@@ -20,9 +20,9 @@ const TABLE = {
   next:             { en: 'Next', 'zh-CN': '下一个' },
   chain:            { en: 'Chain ×{n}', 'zh-CN': '连锁 ×{n}' },
   goalMakeTier:     { en: 'Make a {tier}', 'zh-CN': '合成{tier}' },
-  goalScore:        { en: 'Score {n}', 'zh-CN': '达到 {n} 分' },
-  goalScoreIn:      { en: 'Score {n} in {m} pushes', 'zh-CN': '{m} 次推动内达到 {n} 分' },
-  goalSurvive:      { en: 'Survive {n} pushes', 'zh-CN': '坚持 {n} 次推动' },
+  goalMergeCount:   { en: 'Make {n} × {tier}', 'zh-CN': '合成 {n} 个{tier}' },
+  par:              { en: 'par {n}', 'zh-CN': '标准 {n} 推' },
+  pushesVsPar:      { en: '{n} pushes · par {m}', 'zh-CN': '{n} 次推动 · 标准 {m} 推' },
   levelComplete:    { en: 'Level Complete!', 'zh-CN': '关卡完成！' },
   gameOver:         { en: 'Over the Line', 'zh-CN': '越线了' },
   gameOverEndless:  { en: 'Run Over', 'zh-CN': '本局结束' },
@@ -38,7 +38,7 @@ const TABLE = {
   on:               { en: 'On', 'zh-CN': '开' },
   off:              { en: 'Off', 'zh-CN': '关' },
   language:         { en: 'Language', 'zh-CN': '语言' },
-  starsToUnlock:    { en: '{n} ★ to unlock', 'zh-CN': '需要 {n} ★ 解锁' },
+  chapterLocked:    { en: 'Solve chapter {n} to unlock', 'zh-CN': '通关第 {n} 章解锁' },
   levelFailed:      { en: 'Out of Pushes', 'zh-CN': '推动次数用完' },
   back:             { en: 'Back', 'zh-CN': '返回' },
   foulWarn:         { en: 'Over the line!', 'zh-CN': '越线警告！' },
@@ -93,4 +93,9 @@ export function t(key: StringKey, vars?: Record<string, string | number>): strin
 
 export function tierName(id: number): string {
   return t(`tier${id}` as StringKey)
+}
+
+/** a level's display name in the current locale (falls back to "Level N") */
+export function levelName(def: { id: number; name?: Record<Locale, string> }): string {
+  return def.name?.[locale] ?? def.name?.en ?? `${t('level')} ${def.id}`
 }

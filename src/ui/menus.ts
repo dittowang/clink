@@ -1,5 +1,5 @@
-import { t, getLocale } from '../core/strings'
-import { CHAPTERS, levelsOfChapter, starsToUnlockChapter, type LevelDef } from '../config/levels'
+import { t, getLocale, levelName } from '../core/strings'
+import { CHAPTERS, levelsOfChapter, levelById, isChapterUnlocked, type LevelDef } from '../config/levels'
 import { totalStars, type SaveData } from '../levels/save'
 
 /**
@@ -27,7 +27,14 @@ export interface Menus {
   showTitle(): void
   showChapters(): void
   showPause(): void
-  showLevelComplete(o: { level: LevelDef; stars: number; score: number; nextId: number | null }): void
+  showLevelComplete(o: {
+    level: LevelDef
+    stars: number
+    score: number
+    /** launches spent solving it — shown against the level's par */
+    pushes: number
+    nextId: number | null
+  }): void
   showLevelFailed(score: number): void
   showFoulGameOver(score: number): void
   showEndlessGameOver(score: number, rank: number | null, served: number): void
@@ -186,8 +193,13 @@ export function createMenus(cb: MenuCallbacks): Menus {
     const spacer = el('div', 'height:16px;')
     p.appendChild(spacer)
     const target = cb.resumeTarget()
+    const targetDef = levelById(target)
     const play = button(t('play'), BTN_PRIMARY, () => cb.onPlay(target))
-    const sub = el('div', 'font-size:13px;opacity:.75;margin-top:-8px;', `${t('level')} ${target}`)
+    const sub = el(
+      'div',
+      'font-size:13px;opacity:.75;margin-top:-8px;',
+      targetDef ? `${t('level')} ${target} · ${levelName(targetDef)}` : `${t('level')} ${target}`
+    )
     const endless = button(t('endless'), BTN_GHOST, () => cb.onPlay(0))
     const chapters = button(t('chapters'), BTN_GHOST, () => showChapters())
     p.append(play, sub, endless, chapters, settingsRow(showTitle))
@@ -204,8 +216,7 @@ export function createMenus(cb: MenuCallbacks): Menus {
       'display:flex;flex-direction:column;gap:14px;width:min(520px,94vw);margin-top:6px;'
     )
     for (const ch of CHAPTERS) {
-      const need = starsToUnlockChapter(ch)
-      const locked = total < need
+      const locked = !isChapterUnlocked(ch, save.stars)
       const card = el(
         'div',
         'border-radius:16px;padding:12px 14px;background:rgba(255,255,255,.08);' +
@@ -216,20 +227,28 @@ export function createMenus(cb: MenuCallbacks): Menus {
         el('div', 'font-size:16px;font-weight:700;', t(`chapter${ch}` as 'chapter1'))
       )
       if (locked) {
-        head.appendChild(el('div', 'font-size:13px;opacity:.85;', t('starsToUnlock', { n: need })))
+        head.appendChild(el('div', 'font-size:13px;opacity:.85;', t('chapterLocked', { n: ch - 1 })))
       }
       card.appendChild(head)
-      const grid = el('div', 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;')
+      // one row of three: number + name + stars per puzzle
+      const grid = el('div', 'display:flex;gap:8px;margin-top:10px;')
       for (const lv of levelsOfChapter(ch)) {
         const stars = save.stars[lv.id] ?? 0
         const cell = el(
           'button',
-          'width:64px;height:56px;border:none;border-radius:12px;font-family:inherit;' +
+          'flex:1;min-width:0;height:64px;padding:0 6px;border:none;border-radius:12px;font-family:inherit;' +
             'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;' +
             `background:${stars > 0 ? 'rgba(255,206,84,.2)' : 'rgba(255,255,255,.12)'};color:#fff;` +
             `cursor:${locked ? 'default' : 'pointer'};`
         )
-        cell.appendChild(el('div', 'font-size:16px;font-weight:700;', String(lv.id)))
+        cell.appendChild(el('div', 'font-size:16px;font-weight:700;line-height:1.1;', String(lv.id)))
+        cell.appendChild(
+          el(
+            'div',
+            'font-size:11px;opacity:.85;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
+            levelName(lv)
+          )
+        )
         cell.appendChild(
           el(
             'div',
@@ -264,11 +283,25 @@ export function createMenus(cb: MenuCallbacks): Menus {
     level: LevelDef
     stars: number
     score: number
+    pushes: number
     nextId: number | null
   }): void {
     const p = panel(0.42)
     p.appendChild(el('div', 'font-size:32px;font-weight:800;', t('levelComplete')))
+    p.appendChild(
+      el('div', 'font-size:15px;opacity:.85;margin-top:-8px;', `${t('level')} ${o.level.id} · ${levelName(o.level)}`)
+    )
     p.appendChild(starRow(o.stars, 46, true))
+    if (o.level.par !== undefined) {
+      // pushes spent against par — the number the stars were cut from
+      p.appendChild(
+        el(
+          'div',
+          `font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;color:${o.stars >= 3 ? '#ffce54' : '#fff'};`,
+          t('pushesVsPar', { n: o.pushes, m: o.level.par })
+        )
+      )
+    }
     const scoreLine = el('div', 'font-size:15px;opacity:.85;', t('score'))
     const scoreNum = el(
       'div',

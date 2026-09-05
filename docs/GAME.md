@@ -195,17 +195,20 @@ stars (the ids moved) — Endless scores, locale and mute carry over.
 
 Endless: golden preset, pool [1..5], no push limit, local top-5 leaderboard.
 Paced by ORDERS (src/config/orders.ts has every number): one card at a time,
-"serve one drink of tier T". First order T3; the ladder climbs one tier per
-2 served (cap min(12, poolMax+2); bumped +1 while T already stands on the
-table). Budget = 5 + 2(T−2) launches (+40 % when no T−1 is on the table);
-the miss resolves when the last launch has settled. Serve: the drink lifts
-40 cm, a waiter's tray slides in under it from the left (service) side and
-carries it out; score = mergeScore(T,1) × 3 × tip,
-tip = 1 + 0.1 × pushes left (≤ 2.0). Miss: "customer left", one seeded junk
-drink (tier 1–2) is tossed 12 cm inside the foul line. Every 3 served the
-pool shifts up a tier ([1..5] → … → [4..8]) with a toast, and the bar
-ambience gets busier (murmur + clinks up to 1.8×). Run Over shows orders
-served; the local top-5 keeps a parallel served count.
+"serve one drink of tier T", on a CLOCK. Target tier is always ≥ poolMax + 1
+(one merge above what is dealt); the ladder climbs one tier per 2 served
+(cap min(12, poolMax + 2); bumped +1 while T already stands on the table).
+Budget = 25 + 10·(T − 4) seconds of play time (menus pause it), ×1.4 when no
+T−1 is on the table; pushes are unlimited (the next drink arrives ≤ 0.8 s
+after a launch so a rush is possible). The last 5 s tick and pulse the card.
+Time-up with a launch still in flight gets 1.5 s of grace; a merge in
+progress always finishes. Serve: the drink lifts 40 cm, a waiter's tray
+slides in and carries it out; score = mergeScore(T,1) × 3 × tip, tip = 1 +
+(clock left / budget) (≤ 2.0). Miss: "customer left", junk tossed near the
+foul line (1/2/3 drinks on consecutive misses, closer each time). Every 3
+served the pool shifts up a tier (start [1..3], cap [8..10] so orders reach
+the dispenser) with a toast, and the bar ambience gets busier. Run Over
+shows orders served; the local top-5 keeps a parallel served count.
 
 ## Spawn director (Endless)
 

@@ -1,13 +1,13 @@
 import * as THREE from 'three'
 import { t, tierName } from '../core/strings'
 import type { TierId } from '../config/tiers'
-import { HUD_MAX_PIPS, HUD_PULSE_AT, MISS_FLASH_S } from '../config/orders'
+import { TIME_WARN_S, MISS_FLASH_S } from '../config/orders'
 
 /**
  * In-game HUD — plain HTML in #ui, system font. Score top-left (with the
  * Endless "Served N" tally under it), pushes top-right (offset left of the
  * pause button the menu layer owns), the Endless ORDER CARD top-centre
- * (thumbnail + tier name + push-budget pips), objective chip bottom-left,
+ * (thumbnail + tier name + a draining clock bar), objective chip bottom-left,
  * pooled score pops positioned via Vector3.project, a centre toast, and the
  * foul-warning chip. All strings via t(). Menus/overlays live in ui/menus.ts.
  *
@@ -23,7 +23,9 @@ export interface OrderCard {
   tier: TierId
   /** data URL from the thumbnailer ('' → the tier hue swatch stands in) */
   thumb: string
+  /** seconds on the clock */
   budget: number
+  /** seconds left */
   remaining: number
 }
 
@@ -44,7 +46,7 @@ export interface Hud {
   setFoulWarning(on: boolean): void
   /** the Endless order card; null hides it (campaign) */
   setOrder(card: OrderCard | null): void
-  /** pushes left on the active order → pips; ≤ HUD_PULSE_AT pulses the card */
+  /** seconds left on the active order → the clock bar; the last TIME_WARN_S pulse the card */
   setOrderRemaining(remaining: number): void
   /** the order was served: green tick state until the next setOrder */
   setOrderDone(): void
@@ -151,17 +153,20 @@ export function createHud(): Hud {
     'font-size:13px;font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;' +
     'text-overflow:ellipsis;'
   const pipRow = document.createElement('div')
-  pipRow.style.cssText = 'display:flex;gap:3px;margin-top:5px;align-items:center;height:7px;'
+  pipRow.style.cssText = 'display:flex;gap:6px;margin-top:5px;align-items:center;height:12px;'
   const bar = document.createElement('div')
   bar.style.cssText =
-    'position:relative;width:100px;height:4px;border-radius:2px;background:rgba(255,255,255,.22);' +
-    'overflow:hidden;display:none;'
+    'position:relative;flex:1;min-width:72px;height:5px;border-radius:3px;background:rgba(255,255,255,.22);' +
+    'overflow:hidden;'
   const barFill = document.createElement('div')
   barFill.style.cssText =
-    'position:absolute;left:0;top:0;bottom:0;width:100%;background:#ffce54;border-radius:2px;' +
-    'transition:width .25s ease-out;'
+    'position:absolute;left:0;top:0;bottom:0;width:100%;background:#ffce54;border-radius:3px;' +
+    'transition:width .12s linear,background .3s;'
   bar.appendChild(barFill)
-  const pips: HTMLDivElement[] = []
+  const secs = document.createElement('div')
+  secs.style.cssText =
+    'font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;min-width:26px;text-align:right;' +
+    'opacity:.92;line-height:1;'
   col.append(orderLabel, orderName, pipRow)
   orderCard.append(thumb, col)
   root.appendChild(orderCard)
@@ -170,27 +175,19 @@ export function createHud(): Hud {
   let cardMode: 'open' | 'done' | 'miss' = 'open'
   let missTimer = 0
 
+  let shownSecond = -1
   function renderPips(): void {
     if (!card) return
-    pipRow.replaceChildren()
-    pips.length = 0
-    if (card.budget <= HUD_MAX_PIPS) {
-      for (let i = 0; i < card.budget; i++) {
-        const p = document.createElement('div')
-        const filled = i < card.remaining
-        p.style.cssText =
-          'width:7px;height:7px;border-radius:50%;transition:background .2s,transform .2s;' +
-          `background:${filled ? '#ffce54' : 'rgba(255,255,255,.25)'};` +
-          (filled ? 'box-shadow:0 0 4px rgba(255,206,84,.55);' : 'transform:scale(.8);')
-        pipRow.appendChild(p)
-        pips.push(p)
-      }
-    } else {
-      bar.style.display = ''
-      barFill.style.width = `${(100 * card.remaining) / card.budget}%`
-      pipRow.appendChild(bar)
+    if (!pipRow.contains(bar)) pipRow.replaceChildren(bar, secs)
+    const frac = card.budget > 0 ? Math.max(0, Math.min(1, card.remaining / card.budget)) : 0
+    barFill.style.width = `${100 * frac}%`
+    barFill.style.background = card.remaining <= TIME_WARN_S ? '#ff6b57' : '#ffce54'
+    const sec = Math.ceil(card.remaining)
+    if (sec !== shownSecond) {
+      shownSecond = sec
+      secs.textContent = `${sec}s`
+      pipRow.title = t('orderSeconds', { n: sec })
     }
-    pipRow.title = t('orderPushes', { n: card.remaining })
   }
 
   function applyPulse(): void {
@@ -199,7 +196,7 @@ export function createHud(): Hud {
       return
     }
     orderCard.style.animation =
-      card.remaining <= HUD_PULSE_AT ? 'clinkOrderPulse .9s ease-in-out infinite' : ''
+      card.remaining <= TIME_WARN_S ? 'clinkOrderPulse .9s ease-in-out infinite' : ''
   }
 
   // ---- objective chip, bottom-left ----

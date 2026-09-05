@@ -8,6 +8,7 @@ import {
   playLevelComplete,
   playMerge,
   playOrderUp,
+  playOrderTick,
   playSandThud,
   playSpawnThud,
 } from './merge'
@@ -325,6 +326,7 @@ export function subscribe(bus: EventBus): () => void {
     bus.on('levelComplete', () => playLevelComplete()),
     bus.on('gameOver', () => playGameOver()),
     bus.on('orderServed', (e) => playOrderUp(e.tip)),
+    bus.on('orderTick', (e) => playOrderTick(e.left)),
     bus.on('muteChange', (e) => audio.setMuted(e.muted)),
   ]
   return () => {

@@ -204,6 +204,21 @@ export function scheduleOrderUp(ctx: BaseAudioContext, dest: AudioNode, t0: numb
   return end - t0
 }
 
+/**
+ * order clock tick: one soft wood-block tap per second in the last seconds —
+ * a 1.6 kHz sine with a 2 ms attack and 45 ms decay plus a touch of noise;
+ * the final second is a hair brighter. Centre panned.
+ */
+export function playOrderTick(left: number): void {
+  const h = audio.playbackHandle()
+  if (!h) return
+  const sink: SourceSink = { srcs: [] }
+  const t0 = h.now + 0.005
+  const bright = left <= 1 ? 1.25 : 1
+  partial(h.ctx, h.fx, sink, t0, { freq: 1600 * bright, amp: 0.14, decay: 0.045, attack: 0.002 })
+  noiseBurst(h.ctx, h.fx, sink, t0, { dur: 0.012, amp: 0.03, type: 'bandpass', freq: 2400, q: 2 })
+}
+
 /** the serve bell, from the service side (left) of the stereo field */
 export function playOrderUp(tip: number): void {
   const h = audio.playbackHandle()

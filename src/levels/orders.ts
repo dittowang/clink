@@ -5,10 +5,10 @@ import {
   ORDER_LADDER_STEP,
   ORDER_MAX_TIER,
   ORDER_POOL_HEADROOM,
-  BUDGET_BASE,
-  BUDGET_PER_TIER,
-  BUDGET_NO_BASE_MULT,
-  TIP_PER_PUSH,
+  TIME_BASE_S,
+  TIME_PER_TIER_S,
+  TIME_NO_BASE_MULT,
+  TIP_TIME_FRAC,
   TIP_CAP,
   JUNK_TIERS,
   JUNK_X_RANGE_M,
@@ -103,10 +103,10 @@ export class OrderManager {
     return tier as TierId
   }
 
-  /** BUDGET(T) = BASE + PER_TIER·(T−2); ×1.4 (ceil) with nothing of T−1 to build from */
+  /** BUDGET_S(T) = BASE + PER_TIER·(T−4) seconds; ×1.4 with nothing of T−1 to build from */
   budgetFor(tier: TierId): number {
-    let b = BUDGET_BASE + BUDGET_PER_TIER * (tier - 2)
-    if (this.onTable((tier - 1) as TierId) === 0) b = Math.ceil(b * BUDGET_NO_BASE_MULT)
+    let b = TIME_BASE_S + TIME_PER_TIER_S * (tier - 4)
+    if (this.onTable((tier - 1) as TierId) === 0) b = Math.round(b * TIME_NO_BASE_MULT)
     return b
   }
 
@@ -120,32 +120,39 @@ export class OrderManager {
     return this.current
   }
 
-  /** a launch happened (the same event the push counter uses) */
-  onLaunch(): void {
-    if (this.current) this.current.used++
+  /** play time advances (fixed step; menus do not tick) */
+  tick(dt: number): void {
+    if (this.current) this.current.used += dt
   }
 
-  get pushesLeft(): number {
+  /** seconds left on the clock (never negative) */
+  get timeLeft(): number {
     return this.current ? Math.max(0, this.current.budget - this.current.used) : 0
   }
 
-  get budgetExhausted(): boolean {
+  /** the clock has run out (the scene adds a short in-flight grace) */
+  get timeUp(): boolean {
     return this.current !== null && this.current.used >= this.current.budget
   }
 
+  /** seconds past zero */
+  get overtime(): number {
+    return this.current ? Math.max(0, this.current.used - this.current.budget) : 0
+  }
+
   /**
-   * The ordered drink arrived. Returns the tip multiplier (1 + 0.1 per push
-   * left, ≤ TIP_CAP) and whether this serve shifted the pool.
+   * The ordered drink arrived. Returns the tip multiplier (1 + the fraction
+   * of the clock still left, ≤ TIP_CAP) and whether this serve shifted the pool.
    */
-  serve(): { tier: TierId; tip: number; pushesLeft: number; served: number; shifted: boolean } {
+  serve(): { tier: TierId; tip: number; timeLeft: number; served: number; shifted: boolean } {
     const o = this.current!
-    const pushesLeft = this.pushesLeft
-    const tip = Math.min(TIP_CAP, 1 + TIP_PER_PUSH * pushesLeft)
+    const timeLeft = this.timeLeft
+    const tip = Math.min(TIP_CAP, 1 + TIP_TIME_FRAC * (o.budget > 0 ? timeLeft / o.budget : 0))
     const before = this.poolShift
     this.served++
     this.missStreak = 0
     this.current = null
-    return { tier: o.tier, tip, pushesLeft, served: this.served, shifted: this.poolShift !== before }
+    return { tier: o.tier, tip, timeLeft, served: this.served, shifted: this.poolShift !== before }
   }
 
   /** the budget ran out: customer left. A miss moves the ladder neither way. */

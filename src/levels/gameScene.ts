@@ -35,6 +35,8 @@ import {
   JUNK_MAX_PER_MISS,
   JUNK_STREAK_INSETS,
   ORDER_SEED_SALT,
+  TIME_GRACE_S,
+  TIME_WARN_S,
 } from '../config/orders'
 import { createThumbnailer } from '../render/thumbnails'
 import RAPIER from '@dimforge/rapier3d-compat'
@@ -221,6 +223,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   const SERVE_HOLD_S = 0.14
   /** world.time at which the next card is issued (after a serve / a miss) */
   let nextOrderAt = Infinity
+  let lastTickSecond = -1
   /** the tossed junk: thud when it lands */
   const junkWatch: { drink: Drink; landed: boolean }[] = []
   const thumbs = createThumbnailer(ctx.renderer, stage.scene, stage.sun)
@@ -587,6 +590,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     const o = orders.issue()
     director.setOrderBias(o.tier)
     hud.setOrder({ tier: o.tier, thumb: thumbs.get(o.tier), budget: o.budget, remaining: o.budget })
+    lastTickSecond = -1
     bus.emit('orderNew', { tier: o.tier, budget: o.budget })
     log('orderNew', { tier: o.tier, budget: o.budget, served: orders.served })
   }
@@ -750,6 +754,14 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     }
     const o = orders.current
     if (!o || serveJob) return
+    // the clock runs on play time only (this is the fixed step; menus pause it)
+    orders.tick(dt)
+    hud.setOrderRemaining(orders.timeLeft)
+    const leftS = Math.ceil(orders.timeLeft)
+    if (orders.timeLeft > 0 && leftS <= TIME_WARN_S && leftS !== lastTickSecond) {
+      lastTickSecond = leftS
+      bus.emit('orderTick', { left: leftS })
+    }
     // fulfilment: a drink of tier T at rest on the table (a merge's grow ends
     // in 'live' at rest; a straight spawn of T that settles counts too)
     let liveT = 0
@@ -761,7 +773,12 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
         return
       }
     }
-    if (orders.budgetExhausted && turn.phase !== 'wait' && !merge.busy && liveT === 0) doMiss()
+    // time's up: a launch already in the air keeps its chance for a short
+    // grace (and a merge in progress always finishes) — then the customer leaves
+    if (orders.timeUp && liveT === 0 && !merge.busy) {
+      const inFlight = turn.phase === 'wait'
+      if (!inFlight || orders.overtime >= TIME_GRACE_S) doMiss()
+    }
   }
 
   // ---- turn loop ----
@@ -1132,10 +1149,6 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
       cradle = null
       refreshTray()
       usedPushes++
-      if (orders?.current) {
-        orders.onLaunch()
-        hud.setOrderRemaining(orders.pushesLeft)
-      }
       if (pushesLeft !== null) {
         pushesLeft = Math.max(0, pushesLeft - 1)
         hud.setPushes(pushesLeft)
@@ -1489,7 +1502,8 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
         ? {
             tier: orders.current ? orders.current.tier : null,
             budget: orders.current ? orders.current.budget : 0,
-            pushesUsed: orders.current ? orders.current.used : 0,
+            elapsed: orders.current ? round3(orders.current.used) : 0,
+            timeLeft: orders.current ? round3(orders.timeLeft) : 0,
             served: orders.served,
             missed: orders.missed,
             poolShift: orders.poolShift,

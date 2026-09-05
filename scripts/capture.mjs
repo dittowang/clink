@@ -203,12 +203,12 @@ async function main() {
     for (let i = 0; i < n; i++) {
       await page.evaluate((dt) => window.__game.stepTo(dt), 1 / fps)
       await page.evaluate(() => window.__game.capture())
-      await page.screenshot({ path: `${outdir}/${String(i).padStart(4, '0')}.png` })
+      await page.screenshot({ path: `${outdir}/${String(i).padStart(4, '0')}.png`, timeout: 180000 })
     }
     console.log(`wrote ${n} frames to ${outdir}`)
   } else if (outPath && outPath.endsWith('.png')) {
     await page.evaluate(() => window.__game.capture())
-    await page.screenshot({ path: outPath })
+    await page.screenshot({ path: outPath, timeout: 180000 })
     console.log(`wrote ${outPath}`)
   }
 

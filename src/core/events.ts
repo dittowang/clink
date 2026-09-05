@@ -36,6 +36,8 @@ export interface GameEvents {
   orderServed: { tier: TierId; score: number; tip: number; served: number }
   /** budget spent without a serve: customer left, junk tossed */
   orderMissed: { tier: TierId; missed: number }
+  /** one per second inside the order clock's last TIME_WARN_S seconds */
+  orderTick: { left: number }
 }
 
 type Handler<T> = (payload: T) => void

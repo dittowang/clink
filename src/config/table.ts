@@ -44,4 +44,4 @@ export const FOUL_GRACE_S = 2.5
 /** speed below which a body counts as settled for turn advancement (m/s) */
 export const SETTLE_SPEED = 0.06
 /** max wait before the next drink arrives regardless of settling (s) */
-export const TURN_TIMEOUT_S = 1.6
+export const TURN_TIMEOUT_S = 0.8 // timed orders: the next drink must arrive fast enough to fire in a rush

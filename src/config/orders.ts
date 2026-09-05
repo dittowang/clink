@@ -34,10 +34,10 @@ export const ORDER_BIAS_T_MINUS_1 = 2.0
 export const ORDER_BIAS_T_MINUS_2 = 1.25
 
 /** serve sequence: lift, then glide off the left (service) side while shrinking */
-export const SERVE_LIFT_M = 0.3
+export const SERVE_LIFT_M = 0.4
 /** the lift's ease-out-back runs over this window (s), inside the glide */
 export const SERVE_LIFT_S = 0.3
-export const SERVE_GLIDE_S = 0.7
+export const SERVE_GLIDE_S = 0.62
 export const SERVE_SHRINK_TO = 0.35
 /** glide target x = −halfW − this (m): past the left rail, onto the service side */
 export const SERVE_SIDE_MARGIN_M = 0.25
@@ -76,9 +76,9 @@ export const POOL_SHIFT_EVERY = 3
 export const POOL_SHIFT_MAX = 4
 
 /** bar busyness for the ambience = min(1, served / this) */
-export const BAR_BUSY_FULL_SERVED = 12
+export const BAR_BUSY_FULL_SERVED = 9
 /** murmur + clink layers scale from 1× to this at busy = 1 */
-export const BAR_BUSY_GAIN_MAX = 1.8
+export const BAR_BUSY_GAIN_MAX = 2.6
 
 /** the HUD card pulses when this many pushes (or fewer) remain */
 export const HUD_PULSE_AT = 2

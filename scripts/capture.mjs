@@ -158,6 +158,7 @@ async function main() {
         if (kind === 'surf') return A.renderSurf()
         if (kind === 'levels') return A.renderLevels()
         if (kind === 'pan') return A.renderPan(Number(a ?? 0))
+        if (kind === 'orderup') return A.renderOrderUp(Number(a ?? 2))
         if (kind === 'ambience') return A.renderAmbience(Number(a ?? 20), b === undefined ? undefined : Number(b))
         throw new Error(`unknown --audio spec: ${s}`)
       }

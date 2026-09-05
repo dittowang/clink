@@ -194,6 +194,23 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   let orders: OrderManager | null = null
   /** the drink being carried off the service side */
   let serveJob: { drink: Drink; t: number; x0: number; y0: number; z0: number; toX: number } | null = null
+  // the waiter's tray: slides in from the service side at carrying height,
+  // takes the drink, carries it out — "picked up", not "fell off"
+  const serveTray = new THREE.Group()
+  {
+    const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 0.7 })
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.01, 40), wood)
+    disc.castShadow = true
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.007, 10, 48), wood)
+    rim.rotation.x = Math.PI / 2
+    rim.position.y = 0.01
+    rim.castShadow = true
+    serveTray.add(disc, rim)
+    serveTray.visible = false
+  }
+  stage.scene.add(serveTray)
+  const SERVE_PICKUP_S = 0.38
+  const SERVE_HOLD_S = 0.14
   /** world.time at which the next card is issued (after a serve / a miss) */
   let nextOrderAt = Infinity
   /** the tossed junk: thud when it lands */
@@ -592,20 +609,40 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     if (!job) return
     job.t += dt
     const d = job.drink
-    const k = Math.min(1, job.t / SERVE_GLIDE_S)
-    const e = k * k * (3 - 2 * k) // smoothstep glide: eases out of rest, into the hand-off
-    // a waiter's lift: straight up over the crowd (ease-out cubic — the
-    // 30 cm lift clears every tier, an overshoot there would read as a toss)
-    const lk = Math.min(1, job.t / SERVE_LIFT_S)
-    const lift = SERVE_LIFT_M * (1 - Math.pow(1 - lk, 3))
-    _tmp.set(job.x0 + (job.toX - job.x0) * e, job.y0 + lift, job.z0)
-    d.body.setNextKinematicTranslation(_tmp)
-    d.visual.scale.setScalar(1 - (1 - SERVE_SHRINK_TO) * e)
-    if (k >= 1) {
-      serveJob = null
-      remove(d)
-      nextOrderAt = world.time + NEXT_ORDER_DELAY_S
+    const lift = SERVE_LIFT_M
+    const trayIn = -world.halfW - 0.55
+    const trayOut = job.toX - 0.35
+    let dx = job.x0
+    let dy = job.y0
+    if (job.t < SERVE_PICKUP_S) {
+      // pickup: the drink rises straight up while the tray slides in under it
+      const k = job.t / SERVE_PICKUP_S
+      const e = 1 - Math.pow(1 - k, 3)
+      dy = job.y0 + lift * e
+      serveTray.visible = true
+      serveTray.position.set(trayIn + (job.x0 - trayIn) * e, job.y0 - d.def.height / 2 + lift - 0.012, job.z0)
+    } else if (job.t < SERVE_PICKUP_S + SERVE_HOLD_S) {
+      // the drink settles onto the tray (a 1 cm dip — weight arriving)
+      const k = (job.t - SERVE_PICKUP_S) / SERVE_HOLD_S
+      dy = job.y0 + lift - 0.01 * Math.sin(k * Math.PI)
+      serveTray.position.set(job.x0, job.y0 - d.def.height / 2 + lift - 0.012, job.z0)
+    } else {
+      // carry out: tray + drink leave together, easing in, no shrink
+      const k = Math.min(1, (job.t - SERVE_PICKUP_S - SERVE_HOLD_S) / SERVE_GLIDE_S)
+      const e = k * k * (3 - 2 * k)
+      dx = job.x0 + (trayOut - job.x0) * e
+      dy = job.y0 + lift + 0.02 * e
+      serveTray.position.set(dx, job.y0 - d.def.height / 2 + lift - 0.012 + 0.02 * e, job.z0)
+      if (k >= 1) {
+        serveJob = null
+        serveTray.visible = false
+        remove(d)
+        nextOrderAt = world.time + NEXT_ORDER_DELAY_S
+        return
+      }
     }
+    _tmp.set(dx, dy, job.z0)
+    d.body.setNextKinematicTranslation(_tmp)
   }
 
   /**
@@ -1412,6 +1449,14 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
           }
         : null,
     // extras beyond HarnessApi, reachable from --eval:
+    /** QA: replace the active order with one for `tier` (ladder untouched) */
+    setOrder: (tier: TierId): void => {
+      if (!orders) return
+      orders.forceTier = tier
+      orders.current = null
+      nextOrderAt = Infinity
+      issueOrder()
+    },
     /** launch an arbitrary spawned drink (merge tests need a same-tier pusher) */
     shove: (id: number, angle: number, power: number): void => {
       const d = world.all.find((x) => x.id === id)

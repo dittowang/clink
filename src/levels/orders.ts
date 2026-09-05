@@ -110,8 +110,12 @@ export class OrderManager {
     return b
   }
 
+  /** QA only: the next issue() uses this tier instead of the ladder */
+  forceTier: TierId | null = null
+
   issue(): Order {
-    const tier = this.targetTier()
+    const tier = this.forceTier ?? this.targetTier()
+    this.forceTier = null
     this.current = { tier, budget: this.budgetFor(tier), used: 0 }
     return this.current
   }

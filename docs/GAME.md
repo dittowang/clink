@@ -66,7 +66,8 @@ Paced by ORDERS (src/config/orders.ts has every number): one card at a time,
 2 served (cap min(12, poolMax+2); bumped +1 while T already stands on the
 table). Budget = 5 + 2(T−2) launches (+40 % when no T−1 is on the table);
 the miss resolves when the last launch has settled. Serve: the drink lifts
-and glides off the left (service) side; score = mergeScore(T,1) × 3 × tip,
+40 cm, a waiter's tray slides in under it from the left (service) side and
+carries it out; score = mergeScore(T,1) × 3 × tip,
 tip = 1 + 0.1 × pushes left (≤ 2.0). Miss: "customer left", one seeded junk
 drink (tier 1–2) is tossed 12 cm inside the foul line. Every 3 served the
 pool shifts up a tier ([1..5] → … → [4..8]) with a toast, and the bar

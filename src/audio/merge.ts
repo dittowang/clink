@@ -175,23 +175,31 @@ export function playGameOver(): void {
 }
 
 /**
- * "Order up": two clean sines a fifth apart (C6 → G6), 60 ms apart, 300 ms
- * decay, plus a soft coin/tip tick whose level scales with the tip (silent
- * at tip 1, a bright little ting at TIP_CAP). Shared core so offline.ts can
- * verify it. Returns total duration (s).
+ * "Order up": a three-note rising chime (C6 → E6 → G6, 90 ms apart, ~0.5 s
+ * decay, a soft octave partial on each so it reads as a bar bell rather
+ * than a sine) followed by the TIP: a little cascade of coin pings whose
+ * count (0–4) and brightness scale with the tip. Loud enough to sit above
+ * the ambience and a routine clink — it is the run's reward sound. Shared
+ * core so offline.ts can verify it. Returns total duration (s).
  */
 export function scheduleOrderUp(ctx: BaseAudioContext, dest: AudioNode, t0: number, tip: number): number {
   const sink: SourceSink = { srcs: [] }
-  partial(ctx, dest, sink, t0, { freq: 1046.5, amp: 0.16, decay: 0.3, attack: 0.002 })
-  partial(ctx, dest, sink, t0 + 0.06, { freq: 1568.0, amp: 0.14, decay: 0.3, attack: 0.002 })
+  const notes = [1046.5, 1318.5, 1568.0]
+  notes.forEach((f, i) => {
+    const at = t0 + i * 0.09
+    partial(ctx, dest, sink, at, { freq: f, amp: 0.26 + 0.03 * i, decay: 0.5, attack: 0.003 })
+    partial(ctx, dest, sink, at, { freq: f * 2, amp: 0.07, decay: 0.25, attack: 0.002 })
+  })
   const k = clamp01((tip - 1) / (TIP_CAP - 1))
-  let end = t0 + 0.36
-  if (k > 0) {
-    const at = t0 + 0.17
-    partial(ctx, dest, sink, at, { freq: 2637 * vary(1, 0.01), amp: 0.025 + 0.075 * k, decay: 0.14, attack: 0.001 })
-    partial(ctx, dest, sink, at, { freq: 5274, amp: 0.012 + 0.03 * k, decay: 0.07, attack: 0.001 })
-    noiseBurst(ctx, dest, sink, at, { dur: 0.03, amp: 0.015 + 0.03 * k, type: 'bandpass', freq: 5200, q: 3 })
-    end = at + 0.16
+  let end = t0 + 0.09 * 2 + 0.55
+  const coins = Math.round(k * 4)
+  for (let c = 0; c < coins; c++) {
+    const at = t0 + 0.34 + c * 0.075
+    const f = 2637 * Math.pow(1.19, (coins - 1 - c) % 3) * vary(1, 0.008)
+    partial(ctx, dest, sink, at, { freq: f, amp: 0.12 + 0.05 * k, decay: 0.16, attack: 0.001 })
+    partial(ctx, dest, sink, at, { freq: f * 2.01, amp: 0.04, decay: 0.08, attack: 0.001 })
+    noiseBurst(ctx, dest, sink, at, { dur: 0.02, amp: 0.02, type: 'bandpass', freq: 6000, q: 3 })
+    end = Math.max(end, at + 0.2)
   }
   return end - t0
 }

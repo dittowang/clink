@@ -5,8 +5,7 @@ import {
   ORDER_LADDER_STEP,
   ORDER_MAX_TIER,
   ORDER_POOL_HEADROOM,
-  TIME_BASE_S,
-  TIME_PER_TIER_S,
+  TIME_BUDGET_S,
   TIME_NO_BASE_MULT,
   TIP_TIME_FRAC,
   TIP_CAP,
@@ -103,9 +102,9 @@ export class OrderManager {
     return tier as TierId
   }
 
-  /** BUDGET_S(T) = BASE + PER_TIER·(T−4) seconds; ×1.4 with nothing of T−1 to build from */
+  /** seconds from TIME_BUDGET_S; ×1.4 with nothing of T−1 to build from */
   budgetFor(tier: TierId): number {
-    let b = TIME_BASE_S + TIME_PER_TIER_S * (tier - 4)
+    let b = TIME_BUDGET_S[tier] ?? TIME_BUDGET_S[12]
     if (this.onTable((tier - 1) as TierId) === 0) b = Math.round(b * TIME_NO_BASE_MULT)
     return b
   }

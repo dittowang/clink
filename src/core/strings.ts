@@ -52,6 +52,7 @@ const TABLE = {
   servedCount:      { en: 'Served {n}', 'zh-CN': '已上 {n} 杯' },
   servedShort:      { en: '{n} served', 'zh-CN': '{n} 杯' },
   customerLeft:     { en: 'Customer left', 'zh-CN': '客人走了' },
+  customerLeftN:    { en: 'Customer left · mess ×{n}', 'zh-CN': '客人走了 · 烂摊子 ×{n}' },
   ordersServed:     { en: 'Orders served: {n}', 'zh-CN': '完成点单：{n}' },
   barHeatingUp:     { en: 'The bar is heating up', 'zh-CN': '酒吧热闹起来了' },
   tip:              { en: 'Tip ×{n}', 'zh-CN': '小费 ×{n}' },

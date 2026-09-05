@@ -24,7 +24,7 @@ export const ORDER_POOL_HEADROOM = 2
  * The miss resolves when the LAST launch has settled (not the instant it
  * fires), so a final push that lands the merge still serves the order.
  */
-export const BUDGET_BASE = 5
+export const BUDGET_BASE = 4
 export const BUDGET_PER_TIER = 2
 /** ×1.4 (rounded up) when the table holds ZERO drinks of tier T−1 */
 export const BUDGET_NO_BASE_MULT = 1.4
@@ -54,6 +54,14 @@ export const NEXT_ORDER_DELAY_S = 0.6
 export const MISS_FLASH_S = 0.5
 
 /** junk tossed on a miss: tier (seeded pick), drop height, x spread, z inset, speed */
+/**
+ * a miss tosses min(streak, JUNK_MAX_PER_MISS) junk drinks — 1 for a single
+ * slip, 2 then 3 for consecutive misses — each landing closer to the foul
+ * line (inset by JUNK_STREAK_INSETS[i]). A run that can no longer keep up
+ * with its orders ends within a few of them instead of stalling for ever.
+ */
+export const JUNK_MAX_PER_MISS = 3
+export const JUNK_STREAK_INSETS: readonly number[] = [0.12, 0.07, 0.03]
 export const JUNK_TIERS: readonly TierId[] = [1, 2]
 export const JUNK_DROP_M = 0.18
 export const JUNK_X_RANGE_M = 0.2
@@ -65,7 +73,7 @@ export const JUNK_VEL_MAX = 0.3
 /** pool progression: every N served the Endless pool shifts up one tier */
 export const POOL_SHIFT_EVERY = 3
 /** max shifts: [1..5] → [2..6] → [3..7] → [4..8] and stays */
-export const POOL_SHIFT_MAX = 3
+export const POOL_SHIFT_MAX = 4
 
 /** bar busyness for the ambience = min(1, served / this) */
 export const BAR_BUSY_FULL_SERVED = 12

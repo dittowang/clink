@@ -108,3 +108,8 @@ pops (positioned via Vector3.project). System font stack. All strings via
 localStorage `clink.save.v1`: { stars: Record<levelId, 0-3>, endless: number[],
 endlessOrders: number[] (orders served per top-5 run, parallel to `endless`;
 missing in old saves → zeros), locale, muted }. Never store anything else.
+
+Miss escalation: consecutive misses toss 1, then 2, then 3 junk drinks, each
+batch landing closer to the foul line (JUNK_STREAK_INSETS); a serve resets the
+streak. A run that can no longer keep up with its orders ends within a few of
+them instead of stalling.

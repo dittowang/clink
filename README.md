@@ -26,6 +26,11 @@ That's it. `npm run build` emits a static `dist/` folder for any host.
   bank. Heavy drinks plow through what they meet, light ones bounce off.
 - **Three of a kind touching** merge into the next tier. Chains within a
   second multiply ×1.5 per link.
+- **Endless is a shift at the beach bar**: the card at the top is the
+  current order — make that drink and it's carried off the table for 3×
+  points plus a tip for spare pushes. Run out of pushes and the customer
+  leaves a mess near the foul line. Every three orders the bar heats up and
+  deals bigger drinks.
 - Bank shots off the far and side rails are legal. The near edge is open —
   drinks that go over are lost to the sand.
 - A drink resting across the **foul line** for a couple of seconds ends the

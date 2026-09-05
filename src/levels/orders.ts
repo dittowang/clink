@@ -50,6 +50,8 @@ export interface JunkToss {
 export class OrderManager {
   served = 0
   missed = 0
+  /** consecutive misses since the last serve — escalates the mess */
+  missStreak = 0
   current: Order | null = null
   private readonly rng: Rng
 
@@ -137,16 +139,18 @@ export class OrderManager {
     const tip = Math.min(TIP_CAP, 1 + TIP_PER_PUSH * pushesLeft)
     const before = this.poolShift
     this.served++
+    this.missStreak = 0
     this.current = null
     return { tier: o.tier, tip, pushesLeft, served: this.served, shifted: this.poolShift !== before }
   }
 
   /** the budget ran out: customer left. A miss moves the ladder neither way. */
-  miss(): { tier: TierId; missed: number } {
+  miss(): { tier: TierId; missed: number; streak: number } {
     const o = this.current!
     this.missed++
+    this.missStreak++
     this.current = null
-    return { tier: o.tier, missed: this.missed }
+    return { tier: o.tier, missed: this.missed, streak: this.missStreak }
   }
 
   /** the mess a miss tosses on the table — three seeded draws, fixed order */

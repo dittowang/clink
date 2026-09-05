@@ -32,6 +32,8 @@ import {
   MISS_FLASH_S,
   JUNK_DROP_M,
   JUNK_Z_INSET_M,
+  JUNK_MAX_PER_MISS,
+  JUNK_STREAK_INSETS,
   ORDER_SEED_SALT,
 } from '../config/orders'
 import { createThumbnailer } from '../render/thumbnails'
@@ -195,7 +197,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   /** world.time at which the next card is issued (after a serve / a miss) */
   let nextOrderAt = Infinity
   /** the tossed junk: thud when it lands */
-  let junkWatch: { drink: Drink; landed: boolean } | null = null
+  const junkWatch: { drink: Drink; landed: boolean }[] = []
   const thumbs = createThumbnailer(ctx.renderer, stage.scene, stage.sun)
 
   /** aim the end-sequence pose: camera at `pos`, looking at (tx, ty, tz) */
@@ -316,7 +318,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     cradle = null
     orders = null
     serveJob = null
-    junkWatch = null
+    junkWatch.length = 0
     nextOrderAt = Infinity
     director?.setOrderBias(null)
     hud.setOrder(null)
@@ -616,18 +618,19 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     if (!orders || !orders.current) return
     const r = orders.miss()
     director.setOrderBias(null)
-    hud.flashOrderMissed(t('customerLeft'))
-    tossJunk()
+    const count = Math.min(JUNK_MAX_PER_MISS, r.streak)
+    hud.flashOrderMissed(count > 1 ? t('customerLeftN', { n: count }) : t('customerLeft'))
+    for (let i = 0; i < count; i++) tossJunk(JUNK_STREAK_INSETS[Math.min(i, JUNK_STREAK_INSETS.length - 1)])
     bus.emit('orderMissed', { tier: r.tier, missed: r.missed })
     log('orderMissed', { tier: r.tier, missed: r.missed })
     nextOrderAt = world.time + MISS_FLASH_S
   }
 
-  function tossJunk(): void {
+  function tossJunk(inset: number = JUNK_Z_INSET_M): void {
     if (!orders) return
     const j = orders.junkToss()
     const r = TIERS[j.tier].radius
-    const z = FOUL_Z - JUNK_Z_INSET_M
+    const z = FOUL_Z - inset
     // seeded x first; sidestep deterministically if something stands there
     let x = j.x
     let placed = cradleSpotFree(x, z, r)
@@ -645,7 +648,7 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     const d = world.spawnDrink(j.tier, x, z, { dropHeight: JUNK_DROP_M, state: 'live' })
     d.body.setLinvel({ x: j.vx, y: 0, z: j.vz }, true)
     attach(d)
-    junkWatch = { drink: d, landed: false }
+    junkWatch.push({ drink: d, landed: false })
     log('junkToss', { id: d.id, tier: j.tier, x: round3(x), z: round3(z), vx: round3(j.vx), vz: round3(j.vz) })
   }
 
@@ -653,14 +656,15 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
   function updateOrders(dt: number): void {
     if (!orders) return
     updateServe(dt)
-    if (junkWatch) {
-      const d = junkWatch.drink
-      if (d.state === 'dead') junkWatch = null
-      else if (!junkWatch.landed && d.currPos.y <= world.surfaceYAt(d.currPos.z) + d.def.height / 2 + 0.004) {
-        junkWatch.landed = true
+    for (let i = junkWatch.length - 1; i >= 0; i--) {
+      const w = junkWatch[i]
+      const d = w.drink
+      if (d.state === 'dead') junkWatch.splice(i, 1)
+      else if (!w.landed && d.currPos.y <= world.surfaceYAt(d.currPos.z) + d.def.height / 2 + 0.004) {
+        w.landed = true
         bus.emit('spawnDrop', { id: d.id, tier: d.tier }) // the dull thud
         log('junkLanded', { id: d.id, x: round3(d.currPos.x), z: round3(d.currPos.z) })
-        junkWatch = null
+        junkWatch.splice(i, 1)
       }
     }
     if (world.time >= nextOrderAt) {

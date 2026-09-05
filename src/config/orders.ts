@@ -72,8 +72,13 @@ export const JUNK_VEL_MAX = 0.3
 
 /** pool progression: every N served the Endless pool shifts up one tier */
 export const POOL_SHIFT_EVERY = 3
-/** max shifts: [1..5] → [2..6] → [3..7] → [4..8] and stays */
-export const POOL_SHIFT_MAX = 4
+/**
+ * max shifts from the [1..3] start: 7 → the pool tops out at [8..10] so the
+ * order ladder (capped at poolMax + headroom) can reach the dispenser (12).
+ * (At 4 the pool stalled at [5..7] and every order after the pineapple was
+ * "pitcher" for ever — the player felt the run stop progressing.)
+ */
+export const POOL_SHIFT_MAX = 7
 
 /** bar busyness for the ambience = min(1, served / this) */
 export const BAR_BUSY_FULL_SERVED = 9

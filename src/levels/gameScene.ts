@@ -412,6 +412,17 @@ export async function createGameScene(ctx: BootCtx): Promise<SceneHandle> {
     })
     sling.setSlope(mods.slopeDeg ?? 0)
     sling.setTableHalfW(world.halfW)
+    // aim preview obstacles: every resting drink + the umbrella pole
+    {
+      const pole = mods.umbrella ? { x: mods.umbrella.x, z: mods.umbrella.z, r: 0.022 } : null
+      sling.setObstacles(function* () {
+        for (const d of world.all) {
+          if (d.state !== 'live') continue
+          yield { x: d.currPos.x, z: d.currPos.z, r: d.def.radius }
+        }
+        if (pole) yield pole
+      })
+    }
     sling.setActiveDrink(null)
 
     dressing = createDressing(def, world.halfW)

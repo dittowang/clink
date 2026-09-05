@@ -64,6 +64,8 @@ export class SlingshotController {
   private dirX = 0
   private dirZ = -1
   private pulseT = 0
+  /** live obstacles (drinks, umbrella pole) the aim preview must stop at */
+  private obstacles: (() => Iterable<{ x: number; z: number; r: number }>) | null = null
   /** table tilt (levels): pull plane + aim visuals follow the tilted plank */
   private slopeTan = 0
   private halfW: number = TABLE.HALF_W
@@ -167,6 +169,15 @@ export class SlingshotController {
   /** Additive (level modifier): clamp the stop marker inside a narrowed table. */
   setTableHalfW(halfW: number): void {
     this.halfW = halfW
+  }
+
+  /**
+   * Additive: the things a launch can hit before any rail — every resting
+   * drink and the umbrella pole. The ring marks the FIRST of them on the
+   * true aim line, so "where will it hit" is honest with obstacles too.
+   */
+  setObstacles(fn: (() => Iterable<{ x: number; z: number; r: number }>) | null): void {
+    this.obstacles = fn
   }
 
   /** plank-top y at world z under the current slope */
@@ -320,6 +331,21 @@ export class SlingshotController {
       const tz = (FAR_Z + r - this.originZ) / this.dirZ
       if (tz > 0 && tz < dist) { dist = tz; sideHit = false }
     }
+    // first obstacle along the true line (ray vs circle in the table plane,
+    // radii summed): a drink or the pole in the way is where the shot ends
+    if (this.obstacles) {
+      for (const o of this.obstacles()) {
+        const rr = o.r + r
+        const ox = o.x - this.originX
+        const oz = o.z - this.originZ
+        const along = ox * this.dirX + oz * this.dirZ
+        if (along <= 0) continue
+        const perp2 = ox * ox + oz * oz - along * along
+        if (perp2 >= rr * rr) continue
+        const t = along - Math.sqrt(rr * rr - perp2)
+        if (t > 0 && t < dist) { dist = t; sideHit = false }
+      }
+    }
     const mx = this.originX + this.dirX * dist
     const mz = clamp(this.originZ + this.dirZ * dist, FAR_Z + r, NEAR_Z)
     this.ring.position.set(mx, this.yAt(mz) + 0.003, mz)
@@ -353,8 +379,16 @@ export class SlingshotController {
     // shown; enough to line up a bank shot on purpose
     this.bounce.visible = sideHit
     if (sideHit) {
-      const bx = -this.dirX
-      const bz = this.dirZ
+      // rails barely bounce (restitution ~0.2): the drink leaves a side rail
+      // at a shallow angle and rides it toward the far end — draw THAT, not
+      // a mirror reflection (the mirror line pointed across the table and
+      // the player aimed for a fold that never happens)
+      const RAIL_BOUNCE = 0.2
+      let bx = -this.dirX * RAIL_BOUNCE
+      let bz = this.dirZ
+      const bn = Math.hypot(bx, bz) || 1
+      bx /= bn
+      bz /= bn
       let rest = Math.max(0, predicted - dist)
       if (bz < -1e-6) rest = Math.min(rest, (FAR_Z + r - mz) / bz)
       if (Math.abs(bx) > 1e-6) {
